@@ -89,17 +89,19 @@ test('renderer update work must still fit the strict 60 fps work budget', () => 
   assert.match(verdict.reasons.join(' '), /60 fps work budget/);
 });
 
-test('missing update timing is incomplete rather than an accidental pass', () => {
-  const verdict = evaluateRendererBenchmark({
-    environment: eligibleEnvironment,
-    results: [
-      passingResult(5000),
-      { ...passingResult(20000), update_ms_p95: undefined },
-    ],
-  });
-  assert.equal(verdict.status, 'measurement_incomplete');
-  assert.equal(verdict.performancePass, false);
-  assert.match(verdict.reasons.join(' '), /no finite update p95/);
+test('missing or null update timing is incomplete rather than an accidental pass', () => {
+  for (const updateMs of [undefined, null]) {
+    const verdict = evaluateRendererBenchmark({
+      environment: eligibleEnvironment,
+      results: [
+        passingResult(5000),
+        { ...passingResult(20000), update_ms_p95: updateMs },
+      ],
+    });
+    assert.equal(verdict.status, 'measurement_incomplete');
+    assert.equal(verdict.performancePass, false);
+    assert.match(verdict.reasons.join(' '), /no finite update p95/);
+  }
 });
 
 test('recurring Long Tasks or an unbounded culled DOM fail the measured gate', () => {
