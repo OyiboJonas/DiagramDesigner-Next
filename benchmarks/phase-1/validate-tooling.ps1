@@ -25,8 +25,10 @@ function Assert-ScriptParses([string]$Path) {
 }
 
 $privateCorpusHarness = Join-Path $repoRoot "benchmarks\private-ddd\prepare-private-corpus.ps1"
+$toolchainPreflight = Join-Path $PSScriptRoot "check-windows-toolchain.ps1"
 $phase1Scripts = @(
     (Join-Path $PSScriptRoot "evidence-common.ps1"),
+    $toolchainPreflight,
     (Join-Path $PSScriptRoot "verify-target-evidence.ps1"),
     (Join-Path $PSScriptRoot "test-evidence-verifier.ps1"),
     (Join-Path $PSScriptRoot "verify-fidelity-evidence.ps1"),
@@ -52,6 +54,11 @@ if ($WindowsConfiguration) {
     if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
         throw "-WindowsConfiguration requires Windows."
     }
+
+    # Fail fast on missing Rust/MSVC prerequisites before entering the longer
+    # target-runner configuration checks. The preflight maps the native rustc
+    # host to the matching Visual Studio component, including ARM64.
+    & $toolchainPreflight
 
     $validationRoot = Join-Path ([System.IO.Path]::GetTempPath()) "ddn-phase1-validate-$([Guid]::NewGuid().ToString('N'))"
     try {
