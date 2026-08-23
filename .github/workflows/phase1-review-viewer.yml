@@ -1,0 +1,42 @@
+name: Phase-1 fidelity review viewer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "benchmarks/phase-1/prepare-fidelity-review-viewer.ps1"
+      - "benchmarks/phase-1/run-target-evidence-windows-clean.ps1"
+      - "benchmarks/phase-1/validate-tooling.ps1"
+      - ".github/workflows/phase1-review-viewer.yml"
+  pull_request:
+    paths:
+      - "benchmarks/phase-1/prepare-fidelity-review-viewer.ps1"
+      - "benchmarks/phase-1/run-target-evidence-windows-clean.ps1"
+      - "benchmarks/phase-1/validate-tooling.ps1"
+      - ".github/workflows/phase1-review-viewer.yml"
+
+jobs:
+  validate-review-viewer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PowerShell syntax and review-viewer template
+        shell: powershell
+        run: |
+          $scripts = @(
+            ".\benchmarks\phase-1\prepare-fidelity-review-viewer.ps1",
+            ".\benchmarks\phase-1\run-target-evidence-windows-clean.ps1"
+          )
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script).Path,
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if (@($errors).Count -ne 0) {
+              throw "PowerShell parse failure in $script`: $(@($errors | ForEach-Object { $_.Message }) -join '; ')"
+            }
+          }
+          .\benchmarks\phase-1\prepare-fidelity-review-viewer.ps1 -ValidateOnly
