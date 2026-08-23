@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - "benchmarks/phase-1/prepare-fidelity-review-viewer.ps1"
+      - "benchmarks/phase-1/prepare-fidelity-review-viewer-de.ps1"
       - "benchmarks/phase-1/run-target-evidence-windows-clean.ps1"
       - "benchmarks/phase-1/validate-tooling.ps1"
       - ".github/workflows/phase1-review-viewer.yml"
   pull_request:
     paths:
       - "benchmarks/phase-1/prepare-fidelity-review-viewer.ps1"
+      - "benchmarks/phase-1/prepare-fidelity-review-viewer-de.ps1"
       - "benchmarks/phase-1/run-target-evidence-windows-clean.ps1"
       - "benchmarks/phase-1/validate-tooling.ps1"
       - ".github/workflows/phase1-review-viewer.yml"
@@ -20,11 +22,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate PowerShell syntax and review-viewer template
+      - name: Validate PowerShell syntax and review-viewer templates
         shell: powershell
         run: |
           $scripts = @(
             ".\benchmarks\phase-1\prepare-fidelity-review-viewer.ps1",
+            ".\benchmarks\phase-1\prepare-fidelity-review-viewer-de.ps1",
             ".\benchmarks\phase-1\run-target-evidence-windows-clean.ps1"
           )
           foreach ($script in $scripts) {
@@ -40,3 +43,4 @@ jobs:
             }
           }
           .\benchmarks\phase-1\prepare-fidelity-review-viewer.ps1 -ValidateOnly
+          .\benchmarks\phase-1\prepare-fidelity-review-viewer-de.ps1 -ValidateOnly
