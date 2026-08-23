@@ -26,9 +26,13 @@ function Assert-ScriptParses([string]$Path) {
 
 $privateCorpusHarness = Join-Path $repoRoot "benchmarks\private-ddd\prepare-private-corpus.ps1"
 $toolchainPreflight = Join-Path $PSScriptRoot "check-windows-toolchain.ps1"
+$ephemeralCargoTarget = Join-Path $PSScriptRoot "ephemeral-cargo-target.ps1"
+$cleanupSafeTargetRunner = Join-Path $PSScriptRoot "run-target-evidence-windows-clean.ps1"
+$cleanupSafeValidator = Join-Path $PSScriptRoot "validate-tooling-clean.ps1"
 $phase1Scripts = @(
     (Join-Path $PSScriptRoot "evidence-common.ps1"),
     $toolchainPreflight,
+    $ephemeralCargoTarget,
     (Join-Path $PSScriptRoot "verify-target-evidence.ps1"),
     (Join-Path $PSScriptRoot "test-evidence-verifier.ps1"),
     (Join-Path $PSScriptRoot "verify-fidelity-evidence.ps1"),
@@ -36,6 +40,8 @@ $phase1Scripts = @(
     (Join-Path $PSScriptRoot "export-fidelity-scene-windows.ps1"),
     (Join-Path $PSScriptRoot "prepare-renderer-decision-review.ps1"),
     (Join-Path $PSScriptRoot "run-target-evidence-windows.ps1"),
+    $cleanupSafeTargetRunner,
+    $cleanupSafeValidator,
     (Join-Path $repoRoot "benchmarks\prepared-cache\run-windows.ps1"),
     (Join-Path $repoRoot "benchmarks\adr-019\run-windows.ps1"),
     $privateCorpusHarness
