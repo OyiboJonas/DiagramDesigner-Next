@@ -1,7 +1,7 @@
 # ADR-019 — Renderer abstraction and SVG exit criterion
 
-- Status: Accepted for Phase 1
-- Date: 2026-08-20
+- Status: Accepted — SVG selected for Phase 1
+- Date: 2026-08-20; renderer selection recorded 2026-08-23
 - Scope: render planning, prepared render scenes, SVG renderer, viewport culling, desktop renderer selection
 
 ## Context
@@ -58,7 +58,7 @@ A persistent document mutation — command transaction, undo or redo — invalid
 
 Transient pointer previews do **not** invalidate the prepared scene. They are rendered as overlays on top of the immutable prepared/base state, consistent with ADR-018.
 
-Full snapshot rebuild is the Phase-1 correctness baseline. Incremental prepared-scene updates for geometry/style/structural commands may be added later behind the same API if target measurements show rebuild latency to be material; renderers must not become coupled to that implementation detail.
+Full snapshot rebuild is the Phase-1 correctness baseline. The representative target measurement recorded below shows no material reason to introduce incremental prepared-scene mutation before renderer promotion. Incremental geometry/style/structural patching remains a later optimization option behind the same API if future real workloads demonstrate a user-visible need.
 
 ### Invalid scene structure fails visibly, not silently
 
@@ -72,18 +72,20 @@ The renderer contract assumes that large documents are not represented by a DOM 
 
 Rotated elements are culled using a conservative axis-aligned bounding box. This may retain extra near-edge elements but must never clip a valid rotated element solely because its unrotated bounds lie outside the viewport.
 
-### SVG is first candidate, not an irreversible platform choice
+### SVG is the Phase-1 production renderer, not an irreversible platform choice
 
-SVG is the first concrete renderer to benchmark. Product/application code must not depend on SVG-specific DOM structure. Renderer-specific code consumes the prepared render plan and transient interaction overlays through a narrow adapter.
+SVG was the first concrete renderer candidate and has now passed the representative Phase-1 target gate. It is therefore selected as the Phase-1 production renderer.
 
-If SVG does not satisfy the benchmark gate, the same planning/domain/editor layers remain valid while Canvas2D/WebGL or the Qt fallback is evaluated.
+Product/application code must still not depend on SVG-specific DOM structure. Renderer-specific code consumes the prepared render plan and transient interaction overlays through a narrow adapter. The production desktop wiring uses a stable SVG facade over the evidence-tested adapter rather than moving SVG state into editor/domain ownership.
+
+Canvas2D/WebGL and Qt remain possible future backends behind the same planning/domain/editor boundaries if later workloads produce evidence for a change. Their evaluation is no longer a Phase-1 prerequisite.
 
 ### Two benchmark layers are required
 
 The benchmark is deliberately split:
 
-1. `render-plan-bench` measures both the cold Rust traversal/snapshot path and repeated `PreparedPage` viewport queries at 5,000 and 20,000 mixed elements. CI records these timings as regression trend data but does not use hosted-runner wall-clock values as a release gate.
-2. `benchmarks/svg-dom` measures actual browser/WebView SVG DOM behavior at a 3840 × 2160 target surface, including frame times, DOM population and Long Tasks.
+1. `render-plan-bench` and the PreparedPage benchmark measure the cold Rust traversal/snapshot path, immutable rebuild/cache behavior and repeated viewport queries at 5,000 and 20,000 mixed elements. CI records smoke/trend data but hosted-runner wall-clock values are not a release gate.
+2. the native ADR-019 benchmark measures actual Tauri/WebView2 SVG behavior at a 3840 × 2160 target surface, including renderer update time, frame cadence, DOM population and Long Tasks.
 
 A fast prepared planner alone does not prove SVG viability.
 
@@ -93,14 +95,17 @@ The renderer decision is made on representative Windows target hardware and the 
 
 SVG remains the primary renderer only if viewport-culling mode passes both 5k and 20k mixed-element cases after warm-up:
 
-- p95 camera-motion frame time ≤ 16.67 ms;
+- renderer update p95 ≤ `1000 / 60 = 16.667 ms`;
+- rAF frame p95 ≤ `17.500 ms`, allowing only a bounded 5% VSync/timestamp-quantization tolerance while keeping the renderer-work budget strict;
 - no recurring Long Tasks during pan/zoom;
 - visible SVG DOM population remains bounded by the viewport/culling margin instead of growing proportionally with total document size;
 - no correctness loss in z-order, master-layer ordering or primitive visibility.
 
+The rAF allowance is **not** additional renderer work budget. It prevents normal 60 Hz callback quantization (for example 16.7–16.8 ms) from being misclassified as renderer work above budget.
+
 The full-DOM case is diagnostic and is not required to pass.
 
-A material miss of the 20k culled target is an architecture exit signal, not a request for page-specific CSS/DOM workarounds.
+A material miss of the 20k culled target remains an architecture exit signal, not a request for page-specific CSS/DOM workarounds.
 
 ## Consequences
 
@@ -112,7 +117,7 @@ A material miss of the 20k culled target is an architecture exit signal, not a r
 - camera planning scales with the spatial candidate set instead of requiring full scene traversal;
 - transient gestures do not invalidate persistent render snapshots;
 - performance decisions are based on target-stack measurement rather than intuition;
-- switching to Canvas/WebGL/Qt does not require rewriting commands, DDNX or legacy conversion;
+- a future switch to Canvas/WebGL/Qt does not require rewriting commands, DDNX or legacy conversion;
 - no per-page renderer hacks are accepted as a substitute for meeting the benchmark.
 
 ### Cost
@@ -120,8 +125,8 @@ A material miss of the 20k culled target is an architecture exit signal, not a r
 - there is an additional prepared render-scene representation between domain and renderer;
 - prepared snapshots duplicate renderable leaf state and need explicit invalidation/rebuild after persistent edits;
 - culling, spatial indexing and group traversal require their own tests/diagnostics;
-- a real Windows/WebView benchmark must be performed before SVG is declared final;
-- SVG DOM and Rust planning need separate measurement tooling.
+- SVG DOM and Rust planning require separate measurement tooling;
+- the selected SVG adapter must retain explicit diagnostics for deferred/unsupported semantics rather than silently approximating them.
 
 ## Phase-1 implementation checkpoint
 
@@ -137,16 +142,17 @@ A material miss of the 20k culled target is an architecture exit signal, not a r
 - immutable `PreparedPage` snapshots;
 - bounded spatial-grid indexing with stable draw-order restoration;
 - full-view and viewport equivalence tests between cold and prepared planning;
-- a deterministic 5k/20k cold + prepared planning benchmark.
+- deterministic 5k/20k planning and PreparedPage benchmarks.
 
-`benchmarks/svg-dom` establishes:
+The native SVG benchmark establishes:
 
-- dependency-free browser/WebView benchmark shell;
+- dependency-free benchmark logic inside the Tauri/WebView2 target stack;
 - 5k and 20k mixed-element scenes;
 - culled and full-DOM comparison modes;
 - native-4K target metadata;
-- p50/p95/p99/max update and frame timing;
-- DOM-node range and Long Task reporting.
+- renderer-update and rAF p50/p95/p99/max timing;
+- DOM-node range and Long Task reporting;
+- provenance-bound retained evidence.
 
 ### Hosted-CI trend checkpoint — 2026-08-20
 
@@ -157,16 +163,56 @@ On one GitHub-hosted Ubuntu runner, using the same 120 viewports and visible ran
 - 20k cold: p50 77.391 ms / p95 80.929 ms;
 - 20k prepared: p50 0.559 ms / p95 0.694 ms; snapshot build 97.970 ms.
 
-The 20k prepared query therefore remains in approximately the same sub-millisecond range as 5k for this synthetic viewport, while the cold path scales strongly with total elements. This validates the prepared-scene architecture direction, **not** the final SVG renderer. Hosted-runner timing is non-deterministic trend data and must not replace the Windows/WebView2 acceptance measurement above.
+The 20k prepared query therefore remains in approximately the same sub-millisecond range as 5k for this synthetic viewport, while the cold path scales strongly with total elements. This validated the prepared-scene architecture direction, not the renderer selection. Hosted-runner timing remains non-deterministic trend data and does not replace target evidence.
+
+### Representative Windows target checkpoint — 2026-08-23
+
+Decision source commit: `6c5595d62ddb905ed864203230c5a7786b36f860`.
+
+The combined archive was verified with `eligibleForPhase1Decision=true` and `diagnosticOnly=false`.
+
+PreparedPage release evidence:
+
+- 5k rebuild p95 `2001 us`, cache-hit p95 `100 ns`, forced-eviction rebuild `1318 us`;
+- 20k rebuild p95 `8967 us`, cache-hit p95 `100 ns`, forced-eviction rebuild `8980 us`.
+
+Conclusion: keep immutable PreparedPage rebuilds for Phase 1. The measurements do not justify incremental patching before renderer promotion.
+
+Native SVG evidence:
+
+- physical target client: `3840x2160`;
+- mechanical verdict: `performance_gate_pass`;
+- Long Task requirement: pass;
+- viewport-bounded DOM requirement: pass.
+
+Manual fidelity review:
+
+- all ten required review checks: correct;
+- blocking fidelity defects: `0`;
+- `ConnectorMarkerDeferred` remains an explicit typed diagnostic;
+- `UnsupportedPrimitive` remains an explicit typed diagnostic.
+
+Final Phase-1 renderer decision: **SVG selected as the production renderer**. Full traceability is recorded in `docs/architecture/adr-019-renderer-decision-record.md`.
+
+The measured squash-merge commit and the fully green PR #7 head share the exact Git tree `f788f8757678d8ec3cefeb7e7283a34540451fc8`; the PR validations therefore exercised the same source tree used for the representative evidence.
 
 ## Follow-on requirements
 
-- bind prepared-scene cache invalidation to the editor persistent history state/page identity at the application boundary;
-- evaluate whether full snapshot rebuild latency after persistent commands requires incremental prepared-scene patching on target hardware;
-- run the SVG benchmark on representative Windows target hardware/WebView2 and record the result;
-- implement the first production SVG renderer adapter only after the exit criterion is measured;
-- add transient interaction-overlay rendering without persistent document mutation;
-- add connector/text/image-specific rendering parity tests;
-- keep Canvas2D/WebGL and Qt as explicit fallback paths until the SVG gate is passed.
+Completed for the Phase-1 decision:
 
-Tracks #11.
+- [x] bind prepared-scene cache invalidation to the editor persistent history state/page identity at the application boundary;
+- [x] measure full snapshot rebuild latency on representative target hardware;
+- [x] run the native SVG benchmark on representative Windows target hardware/WebView2;
+- [x] complete deterministic fidelity evidence and manual review;
+- [x] select the Phase-1 renderer from evidence;
+- [x] promote the measured SVG path through a stable production adapter/facade.
+
+Continuing work after Phase 1:
+
+- keep transient interaction overlays free of persistent document mutation;
+- expand connector/text/image rendering parity as those semantics are implemented;
+- retain typed diagnostics for deferred features;
+- preserve Canvas2D/WebGL/Qt as renderer-abstraction options rather than parallel Phase-1 implementations;
+- reopen incremental PreparedPage design only if future representative workloads demonstrate material user-visible rebuild latency.
+
+Tracks #2.
