@@ -1,6 +1,7 @@
 /target
 **/target
 /benchmark-results/
+/apps/desktop/src-tauri/gen/schemas/
 /private-fixtures/
 fixtures/private-corpus.local.json
 fixtures/*.private.json
