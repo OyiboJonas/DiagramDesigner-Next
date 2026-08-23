@@ -126,12 +126,15 @@ fn renders_every_standard_marker_without_deferred_diagnostics() {
         .collect();
     let (document, page_id) = document(elements, Vec::new());
     let plan = build_page_plan(&document, page_id, RenderPlanOptions::default()).unwrap();
-    let output = render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
+    let output =
+        render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
 
-    assert!(!output.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic,
-        SvgDiagnostic::ConnectorMarkerDeferred { .. }
-    )));
+    assert!(
+        !output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic, SvgDiagnostic::ConnectorMarkerDeferred { .. }))
+    );
     for name in [
         "stop",
         "circle",
@@ -152,7 +155,10 @@ fn renders_every_standard_marker_without_deferred_diagnostics() {
             "missing marker {name}"
         );
     }
-    assert_eq!(output.svg.matches(" marker-end=\"url(#ddn-marker-").count(), 11);
+    assert_eq!(
+        output.svg.matches(" marker-end=\"url(#ddn-marker-").count(),
+        11
+    );
 }
 
 #[test]
@@ -168,13 +174,17 @@ fn supports_start_and_end_markers_with_auto_start_reverse_orientation() {
     let element_id = connector.id;
     let (document, page_id) = document(vec![connector], Vec::new());
     let plan = build_page_plan(&document, page_id, RenderPlanOptions::default()).unwrap();
-    let output = render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
+    let output =
+        render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
 
     assert!(output.svg.contains(&format!(
         "<line data-element-id=\"{}\" marker-start=\"url(#ddn-marker-{}-start)\" marker-end=\"url(#ddn-marker-{}-end)\"",
         element_id.0, element_id.0, element_id.0
     )));
-    assert_eq!(output.svg.matches("orient=\"auto-start-reverse\"").count(), 2);
+    assert_eq!(
+        output.svg.matches("orient=\"auto-start-reverse\"").count(),
+        2
+    );
 }
 
 #[test]
@@ -190,7 +200,8 @@ fn keeps_custom_markers_explicitly_deferred() {
     let element_id = connector.id;
     let (document, page_id) = document(vec![connector], Vec::new());
     let plan = build_page_plan(&document, page_id, RenderPlanOptions::default()).unwrap();
-    let output = render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
+    let output =
+        render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
 
     assert!(output.diagnostics.iter().any(|diagnostic| matches!(
         diagnostic,
@@ -243,7 +254,8 @@ fn uml_and_outline_marker_interiors_use_secondary_color() {
     );
     let (document, page_id) = document(vec![uml, outline], vec![style]);
     let plan = build_page_plan(&document, page_id, RenderPlanOptions::default()).unwrap();
-    let output = render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
+    let output =
+        render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
 
     assert!(output.svg.matches("fill=\"#f07814\"").count() >= 2);
     assert!(output.svg.matches("fill-opacity=\"0.502\"").count() >= 2);
