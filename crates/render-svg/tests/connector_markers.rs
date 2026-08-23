@@ -241,7 +241,7 @@ fn uml_and_outline_marker_interiors_use_secondary_color() {
         MarkerStyle::None,
         MarkerStyle::UmlIsA,
         LineStyle::Solid,
-        secondary.clone(),
+        secondary,
         Some(style_id),
     );
     let outline = connector_element(
