@@ -1,0 +1,18 @@
+name: Windows native toolchain preflight
+
+on:
+  push:
+    branches: [main, "phase-1/**", "agent/**"]
+  pull_request:
+
+jobs:
+  windows-native-toolchain:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+      - name: Validate hosted Windows MSVC discovery
+        shell: powershell
+        run: .\benchmarks\phase-1\check-windows-toolchain.ps1 -SkipCompileCheck
