@@ -163,10 +163,12 @@ Rationale: <complete from representative evidence>
 - Monitor: $($renderer.environment.monitorName) / $($renderer.environment.monitorWidthPx)x$($renderer.environment.monitorHeightPx)
 - Mechanical verdict: $performanceVerdict
 
-| Case | Frame p95 | Long Tasks | DOM max | Physical stage | Reviewer conclusion |
-| --- | ---: | ---: | ---: | --- | --- |
-| 5,000 culled | $(Format-NumberInvariant $culled5k.frame_ms_p95) ms | $($culled5k.long_tasks_observed) | $($culled5k.dom_nodes_max) | $($culled5k.stage_physical_px.width)x$($culled5k.stage_physical_px.height) | <pass / fail / repeat> |
-| 20,000 culled | $(Format-NumberInvariant $culled20k.frame_ms_p95) ms | $($culled20k.long_tasks_observed) | $($culled20k.dom_nodes_max) | $($culled20k.stage_physical_px.width)x$($culled20k.stage_physical_px.height) | <pass / fail / repeat> |
+| Case | Update p95 | Frame p95 | Long Tasks | DOM max | Physical stage | Reviewer conclusion |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| 5,000 culled | $(Format-NumberInvariant $culled5k.update_ms_p95) ms | $(Format-NumberInvariant $culled5k.frame_ms_p95) ms | $($culled5k.long_tasks_observed) | $($culled5k.dom_nodes_max) | $($culled5k.stage_physical_px.width)x$($culled5k.stage_physical_px.height) | <pass / fail / repeat> |
+| 20,000 culled | $(Format-NumberInvariant $culled20k.update_ms_p95) ms | $(Format-NumberInvariant $culled20k.frame_ms_p95) ms | $($culled20k.long_tasks_observed) | $($culled20k.dom_nodes_max) | $($culled20k.stage_physical_px.width)x$($culled20k.stage_physical_px.height) | <pass / fail / repeat> |
+
+Timing contract: update p95 must fit the strict 60 fps work budget (16.667 ms); rAF frame p95 must remain at or below 17.500 ms, including the bounded 5% VSync/timestamp tolerance.
 
 Mechanical verdict reasons:
 
