@@ -29,6 +29,7 @@ $toolchainPreflight = Join-Path $PSScriptRoot "check-windows-toolchain.ps1"
 $ephemeralCargoTarget = Join-Path $PSScriptRoot "ephemeral-cargo-target.ps1"
 $cleanupSafeTargetRunner = Join-Path $PSScriptRoot "run-target-evidence-windows-clean.ps1"
 $cleanupSafeValidator = Join-Path $PSScriptRoot "validate-tooling-clean.ps1"
+$fidelityReviewViewer = Join-Path $PSScriptRoot "prepare-fidelity-review-viewer.ps1"
 $phase1Scripts = @(
     (Join-Path $PSScriptRoot "evidence-common.ps1"),
     $toolchainPreflight,
@@ -39,6 +40,7 @@ $phase1Scripts = @(
     (Join-Path $PSScriptRoot "test-fidelity-evidence-verifier.ps1"),
     (Join-Path $PSScriptRoot "export-fidelity-scene-windows.ps1"),
     (Join-Path $PSScriptRoot "prepare-renderer-decision-review.ps1"),
+    $fidelityReviewViewer,
     (Join-Path $PSScriptRoot "run-target-evidence-windows.ps1"),
     $cleanupSafeTargetRunner,
     $cleanupSafeValidator,
@@ -54,7 +56,8 @@ Write-Host "PowerShell syntax validation passed for $($phase1Scripts.Count) Phas
 
 & (Join-Path $PSScriptRoot "test-fidelity-evidence-verifier.ps1")
 & (Join-Path $PSScriptRoot "test-evidence-verifier.ps1")
-Write-Host "Synthetic Phase-1 archive, fidelity and renderer-review tests passed."
+& $fidelityReviewViewer -ValidateOnly
+Write-Host "Synthetic Phase-1 archive, fidelity, renderer-review and review-viewer tests passed."
 
 if ($WindowsConfiguration) {
     if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
