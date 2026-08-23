@@ -80,7 +80,7 @@ function New-ReviewViewerHtml([hashtable]$Data) {
         @("edge-sentinels", "All four rotated page-edge sentinels remain visible and clipped correctly"),
         @("marker-diagnostic", "Deferred connector marker remains an explicit diagnostic"),
         @("polygon-diagnostic", "Unsupported polygon remains an explicit diagnostic"),
-        @("zoom-review", "Scene reviewed at 100% and representative viewer zoom levels")
+        @("zoom-review", "Scene reviewed at intrinsic 100% and representative viewer zoom levels")
     )
 
     $rows = [System.Text.StringBuilder]::new()
@@ -127,7 +127,7 @@ button { border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); bord
 button[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: 1px; }
 .scene-viewport { height: min(66vh, 780px); overflow: auto; background: white; border: 1px solid #bbb; border-radius: 8px; }
 .scene-wrap { min-width: 100%; min-height: 100%; display: flex; align-items: flex-start; justify-content: flex-start; padding: 16px; }
-#scene { display: block; width: 100%; max-width: none; height: auto; transform-origin: top left; }
+#scene { display: block; width: auto; max-width: none; height: auto; transform-origin: top left; }
 .badge { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 9px; font-size: 12px; font-weight: 600; }
 .badge.good { background: #dff4e4; color: #174d25; }
 .badge.warn { background: #fff0c7; color: #6b4b00; }
@@ -163,14 +163,14 @@ textarea { width: 100%; min-height: 160px; resize: vertical; padding: 9px; font-
       <h2>Deterministic fidelity scene</h2>
       <div class="card-body">
         <div class="viewer-toolbar" role="toolbar" aria-label="Viewer zoom">
-          <strong>Viewer zoom</strong>
+          <strong>Intrinsic viewer zoom</strong>
           <button type="button" data-zoom="50">50%</button>
           <button type="button" data-zoom="100" aria-pressed="true">100%</button>
           <button type="button" data-zoom="150">150%</button>
           <button type="button" data-zoom="200">200%</button>
           <span class="review-progress" id="progress">0 / 10 reviewed</span>
         </div>
-        <div class="notice">This is a derived local review aid, not evidence. The SVG is embedded as an image from the already verified archive; changing review selections does not modify the evidence files or select a renderer.</div>
+        <div class="notice">This is a derived local review aid, not evidence. At 100% the image uses the SVG's intrinsic browser size; the other buttons scale from that same baseline. This is a rendering-fidelity zoom, not physical print-size calibration. The SVG is embedded as an image from the already verified archive; changing review selections does not modify the evidence files or select a renderer.</div>
         <div class="scene-viewport" id="viewport">
           <div class="scene-wrap"><img id="scene" alt="ADR-019 deterministic fidelity scene" src="data:image/svg+xml;base64,__SVG_BASE64__"></div>
         </div>
@@ -250,6 +250,15 @@ textarea { width: 100%; min-height: 160px; resize: vertical; padding: 9px; font-
   const rows = [...document.querySelectorAll('#review-table tbody tr')];
   const progress = document.getElementById('progress');
   const summary = document.getElementById('summary');
+  const scene = document.getElementById('scene');
+  let intrinsicWidth = 0;
+
+  function applyZoom(percent) {
+    if (!intrinsicWidth) intrinsicWidth = scene.naturalWidth;
+    if (!intrinsicWidth) return;
+    scene.style.width = `${intrinsicWidth * percent / 100}px`;
+    scene.style.height = 'auto';
+  }
 
   function load() {
     let saved = {};
@@ -295,11 +304,14 @@ textarea { width: 100%; min-height: 160px; resize: vertical; padding: 9px; font-
   for (const button of document.querySelectorAll('[data-zoom]')) {
     button.addEventListener('click', () => {
       const zoom = Number(button.dataset.zoom);
-      document.getElementById('scene').style.width = `${zoom}%`;
+      applyZoom(zoom);
       for (const other of document.querySelectorAll('[data-zoom]')) other.removeAttribute('aria-pressed');
       button.setAttribute('aria-pressed', 'true');
     });
   }
+
+  scene.addEventListener('load', () => applyZoom(100));
+  if (scene.complete) applyZoom(100);
 
   document.getElementById('build-summary').addEventListener('click', () => {
     const lines = [
@@ -428,6 +440,7 @@ if ($ValidateOnly) {
     foreach ($required in @(
         "data:image/svg+xml;base64,",
         "Master layer remains behind page-local layer",
+        "intrinsicWidth = scene.naturalWidth",
         "ConnectorMarkerDeferred",
         "Final renderer decision: NOT MADE BY THIS REVIEW AID",
         "performance_gate_pass"
