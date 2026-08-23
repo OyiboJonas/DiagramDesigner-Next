@@ -141,4 +141,5 @@ Phase 1 may be marked complete only when:
 - [ ] manual fidelity review is complete with no unresolved blocking defect;
 - [ ] final renderer decision is recorded above;
 - [ ] production renderer follow-up is clearly assigned or implemented as required by the decision;
-- [ ] PR #12 and issue #11 are updated to the same source/evidence checkpoint.
+- [ ] public Phase-1 tracking issue #2 is updated to the same source/evidence checkpoint;
+- [ ] any renderer-promotion pull request references that same evidence checkpoint.

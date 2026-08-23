@@ -235,7 +235,8 @@ Final rationale: <complete after review>
 - [ ] native renderer performance conclusion is recorded;
 - [ ] manual fidelity review is complete with no unresolved blocking defect;
 - [ ] final renderer decision is recorded;
-- [ ] PR #12 and issue #11 are updated to this source/evidence checkpoint.
+- [ ] public Phase-1 tracking issue #2 is updated to this source/evidence checkpoint;
+- [ ] any renderer-promotion pull request references that same evidence checkpoint.
 "@
 
 $parent = Split-Path -Parent $OutputFile
