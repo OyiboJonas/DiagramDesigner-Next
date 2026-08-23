@@ -81,11 +81,8 @@ fn apply_standard_connector_markers(
                 stroke,
                 &secondary,
             ));
-            write!(
-                line_attributes,
-                " marker-{slot}=\"url(#{marker_id})\""
-            )
-            .expect("writing SVG marker attributes into String cannot fail");
+            write!(line_attributes, " marker-{slot}=\"url(#{marker_id})\"")
+                .expect("writing SVG marker attributes into String cannot fail");
         }
 
         if !line_attributes.is_empty() {
@@ -175,10 +172,7 @@ fn resolve_paint(color: &Color) -> (Paint, Option<u8>) {
             },
             None,
         ),
-        Color::SystemPalette { index } => (
-            Paint::opaque(SYSTEM_PALETTE_FALLBACK),
-            Some(*index),
-        ),
+        Color::SystemPalette { index } => (Paint::opaque(SYSTEM_PALETTE_FALLBACK), Some(*index)),
     }
 }
 
