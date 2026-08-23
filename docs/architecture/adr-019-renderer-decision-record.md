@@ -52,11 +52,15 @@ Record the mechanical verdict from the retained native Tauri/WebView2 report:
 - Platform: `<windows>`
 - Physical client area: `<width>x<height>`
 - Monitor: `<name / dimensions>`
-- 5k culled p95: `<value>`
-- 20k culled p95: `<value>`
+- 5k culled update p95: `<value>`
+- 5k culled frame p95: `<value>`
+- 20k culled update p95: `<value>`
+- 20k culled frame p95: `<value>`
 - Long Task requirement: `<pass/fail>`
 - viewport-bounded DOM requirement: `<pass/fail>`
 - mechanical performance verdict: `<performance_gate_pass|...>`
+
+Timing contract: update p95 must be at or below the strict 60 fps renderer-work budget (`1000 / 60 = 16.667 ms`). rAF frame p95 must be at or below `17.500 ms`, which is the same 60 fps target with a bounded 5% allowance for VSync cadence/timestamp quantization. The rAF allowance is not additional renderer work budget.
 
 Performance conclusion: `<pass / fail / repeat measurement>`
 
