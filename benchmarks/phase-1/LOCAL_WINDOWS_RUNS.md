@@ -43,11 +43,42 @@ The wrapper creates a unique `ddn-cargo-target-*` child directory under the sele
 
 Use `-KeepBuildArtifacts` only when compiler outputs are needed for diagnostics. The wrapper then prints the retained target path explicitly.
 
+## Fidelity review viewer
+
+After a successful real target run the cleanup-safe wrapper creates `adr-019-fidelity-review.html` in the new target-session directory. The viewer is generated only after the combined evidence archive has passed verification.
+
+The viewer:
+
+- embeds the retained fidelity SVG as passive image data rather than inline SVG markup;
+- shows source/evidence hashes and decision eligibility;
+- shows PreparedPage and native SVG performance metrics beside the scene;
+- exposes 50%, 100%, 150% and 200% viewer zoom controls;
+- presents the complete Phase-1 manual fidelity checklist;
+- keeps checklist selections as local browser review state only;
+- can build/copy a text summary for the human decision record;
+- cannot modify evidence files or select a renderer.
+
+Open it automatically after the target run with:
+
+```powershell
+.\benchmarks\phase-1\run-target-evidence-windows-clean.ps1 -OpenReviewViewer
+```
+
+For an existing completed target session, regenerate the derived viewer independently with:
+
+```powershell
+.\benchmarks\phase-1\prepare-fidelity-review-viewer.ps1 `
+  -SessionDirectory .\benchmark-results\phase-1-target\target-<timestamp>-<commit> `
+  -Open
+```
+
+`-Force` is required to replace an existing derived viewer. This never changes the immutable target, renderer or fidelity evidence archives.
+
 ## What is retained
 
 The cleanup-safe wrappers remove Cargo/Tauri build products only. They do not remove:
 
-- `benchmark-results` evidence;
+- `benchmark-results` evidence or derived local review files;
 - source files or Git metadata;
 - Rust toolchains under `.rustup`;
 - Cargo tools/cache under `.cargo`;
