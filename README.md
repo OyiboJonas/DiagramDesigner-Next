@@ -2,22 +2,35 @@
 
 Modern, migration-safe successor to Diagram Designer.
 
-> Status: Phase 1 — editor foundation and renderer decision in progress
+> Status: Phase 1 — SVG selected as production renderer
 
 DiagramDesigner Next is an independent architectural rewrite with explicit compatibility tooling for legacy `.ddd` and `.ddt` documents. The original `meesoft/DiagramDesigner` project is used as the functional and legacy-format reference; see `THIRD_PARTY_NOTICES.md`.
 
-Phase 0 established the bounded legacy decoding/migration boundary, renderer-independent `next-domain` model and deterministic DDNX persistence. Phase 1 builds the editor foundation, desktop persistence/recovery, interaction model and replaceable renderer candidate on top of that boundary.
+Phase 0 established the bounded legacy decoding/migration boundary, renderer-independent `next-domain` model and deterministic DDNX persistence. Phase 1 builds the editor foundation, desktop persistence/recovery, interaction model and replaceable renderer boundary on top of that foundation.
 
-## Phase-1 renderer gate
+## Phase-1 renderer decision
 
-The editor/application foundations, atomic desktop persistence, recovery, command history, viewport interaction, snapping/rulers, keyboard accessibility, PreparedPage caching and the SVG renderer candidate are implemented.
+The editor/application foundations, atomic desktop persistence, recovery, command history, viewport interaction, snapping/rulers, keyboard accessibility, PreparedPage caching and SVG renderer path are implemented.
 
-SVG is **not** yet the selected production renderer. The remaining Phase-1 exit gate is representative target-hardware evidence plus correctness/fidelity review under ADR-019.
+ADR-019 selected SVG as the Phase-1 production renderer after representative Windows target evidence and manual fidelity review. The decision checkpoint is source commit `6c5595d62ddb905ed864203230c5a7786b36f860` and is recorded in `docs/architecture/adr-019-renderer-decision-record.md`.
 
-On representative Windows hardware with a physical client area of at least 3840×2160, run:
+The decision evidence established:
+
+- decision-eligible, non-diagnostic combined target evidence;
+- acceptable immutable PreparedPage rebuild/cache behavior at 5k and 20k;
+- native fullscreen Tauri/WebView2 `performance_gate_pass` at physical 3840×2160;
+- viewport-bounded SVG DOM and no recurring Long Tasks under the mechanical gate;
+- all required manual fidelity checks correct with zero blocking defects;
+- explicit typed diagnostics for deferred marker and unsupported primitive semantics.
+
+SVG remains behind the renderer abstraction. `next-domain`, editor history/commands and renderer-neutral geometry do not own SVG DOM state, so a future backend change remains possible without rewriting the document/editor model.
+
+## Reproducing Phase-1 target evidence
+
+On representative Windows hardware with a physical client area of at least 3840×2160, use the cleanup-safe runner:
 
 ```powershell
-.\benchmarks\phase-1\run-target-evidence-windows.ps1
+.\benchmarks\phase-1\run-target-evidence-windows-clean.ps1 -OpenReviewViewer
 ```
 
 The combined target run archives:
@@ -26,25 +39,25 @@ The combined target run archives:
 - native fullscreen Tauri/WebView2 SVG evidence;
 - deterministic ADR-019 fidelity-scene evidence through `render-plan → render-svg`;
 - source/lockfile provenance and evidence hashes;
-- a prefilled `adr-019-renderer-decision-review.md` for human review.
+- a prefilled `adr-019-renderer-decision-review.md` and local fidelity-review viewer.
 
-A clean source tree is required for evidence that may participate in the renderer decision. Diagnostic dirty-tree runs cannot be promoted into decision evidence.
+A clean source tree is required for evidence that may participate in an architecture decision. Diagnostic dirty-tree runs cannot be promoted into decision evidence. Large Cargo/Tauri build products are isolated and cleaned by the wrapper; retained evidence remains under `benchmark-results/` and is ignored by Git.
 
 ## Local tooling validation
 
 Phase-1 evidence/review tooling can be checked independently of GitHub Actions:
 
 ```powershell
-.\benchmarks\phase-1\validate-tooling.ps1
+.\benchmarks\phase-1\validate-tooling-clean.ps1
 ```
 
-On Windows, use:
+For lower-level configuration checks, the underlying validator remains available:
 
 ```powershell
 .\benchmarks\phase-1\validate-tooling.ps1 -WindowsConfiguration
 ```
 
-This validates the target-runner/fidelity/private-corpus configuration without reading private fixture files.
+This validates the target-runner/fidelity/private-corpus configuration without reading private fixture files and does not itself create representative target evidence.
 
 ## Private legacy compatibility evidence
 
