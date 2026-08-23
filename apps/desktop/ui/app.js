@@ -1,5 +1,5 @@
-import { createCandidateSvgKeyboardSurface } from './candidate-svg-keyboard.mjs';
-import { createCandidateSvgSurface } from './candidate-svg-surface.mjs';
+import { createSvgKeyboardSurface } from './svg-keyboard.mjs';
+import { createSvgSurface } from './svg-surface.mjs';
 import { buildRulerTicks } from './editor-interaction/snapping.mjs';
 
 const invoke = window.__TAURI__?.core?.invoke;
@@ -49,8 +49,8 @@ let presentationRequestSequence = 0;
 let currentPresentation = null;
 let keyboardSurface = null;
 
-const candidateSurface = createCandidateSvgSurface(elements.canvasPage, {
-  commitMove: commitCandidateMove,
+const svgSurface = createSvgSurface(elements.canvasPage, {
+  commitMove: commitSvgMove,
   onSelectionChange: (elementIds) => {
     keyboardSurface?.syncSelectionState(elementIds);
     syncSelection(elementIds);
@@ -59,13 +59,13 @@ const candidateSurface = createCandidateSvgSurface(elements.canvasPage, {
     setStatus(formatInvokeError(error));
   },
 });
-keyboardSurface = createCandidateSvgKeyboardSurface(elements.canvasPage, {
-  getSelection: () => candidateSurface.selectedElementIds,
-  setSelection: (elementIds) => candidateSurface.setSelection(elementIds),
+keyboardSurface = createSvgKeyboardSurface(elements.canvasPage, {
+  getSelection: () => svgSurface.selectedElementIds,
+  setSelection: (elementIds) => svgSurface.setSelection(elementIds),
   onStatus: setStatus,
 });
 keyboardSurface.clear();
-candidateSurface.setInteractionSettings(interactionSettings);
+svgSurface.setInteractionSettings(interactionSettings);
 renderInteractionButtons();
 
 function setBusy(busy) {
@@ -113,7 +113,7 @@ function renderPresentationStats(presentation) {
     ? `${interactionSettings.gridStepMm} mm grid`
     : 'grid hidden';
   elements.rendererStats.textContent =
-    `SVG candidate · ${rendered} rendered · ${skipped} skipped · ${diagnostics} diagnostics · ${gridState} · ${snapState}`;
+    `SVG · ${rendered} rendered · ${skipped} skipped · ${diagnostics} diagnostics · ${gridState} · ${snapState}`;
 }
 
 function renderRulers(presentation) {
@@ -146,7 +146,7 @@ function renderInteractionButtons() {
 }
 
 function applyInteractionSettings(message) {
-  candidateSurface.setInteractionSettings(interactionSettings);
+  svgSurface.setInteractionSettings(interactionSettings);
   renderInteractionButtons();
   renderPresentationStats(currentPresentation);
   if (message) {
@@ -171,13 +171,16 @@ async function refreshPresentation({ preserveSelection = true } = {}) {
 
   const requestSequence = ++presentationRequestSequence;
   try {
+    // Keep the evidence-tested Tauri command name as an internal compatibility
+    // boundary for Phase 1. The production UI consumes it only through the
+    // renderer-neutral presentation DTO and the stable SVG facade above.
     const presentation = await invoke('candidate_page_presentation');
     if (requestSequence !== presentationRequestSequence) {
       return null;
     }
     const restoreKeyboardFocus = keyboardSurface?.hasKeyboardFocus === true;
     currentPresentation = presentation;
-    candidateSurface.setPresentation(presentation, { preserveSelection });
+    svgSurface.setPresentation(presentation, { preserveSelection });
     keyboardSurface?.refresh({ restoreFocus: restoreKeyboardFocus });
     renderPresentationStats(presentation);
     renderRulers(presentation);
@@ -185,10 +188,10 @@ async function refreshPresentation({ preserveSelection = true } = {}) {
   } catch (error) {
     if (requestSequence === presentationRequestSequence) {
       currentPresentation = null;
-      candidateSurface.clear();
+      svgSurface.clear();
       keyboardSurface?.clear();
       renderRulers(null);
-      elements.rendererStats.textContent = 'Candidate renderer failed.';
+      elements.rendererStats.textContent = 'SVG renderer failed.';
       setStatus(formatInvokeError(error));
     }
     return null;
@@ -206,12 +209,12 @@ function syncSelection(elementIds) {
   });
 }
 
-async function commitCandidateMove(commit) {
+async function commitSvgMove(commit) {
   if (!invoke) {
     throw new Error('Tauri runtime not detected');
   }
   if (commit?.kind !== 'move-elements') {
-    throw new TypeError('candidate surface emitted an unsupported semantic command');
+    throw new TypeError('SVG surface emitted an unsupported semantic command');
   }
 
   const state = await invoke('commit_move_elements', {
