@@ -11,7 +11,9 @@ Two modes are measured:
 - `viewport-culling`: only elements intersecting the current viewport plus a 12-unit margin exist in the SVG DOM. The benchmark rebuilds the visible set for each camera position, so the number includes a deliberately conservative DOM-update cost.
 - `full DOM`: all requested elements stay mounted and panning changes only the SVG `viewBox`. This is diagnostic; it is not the preferred architecture and never substitutes for the culled acceptance cases.
 
-For every case the benchmark records DOM-node range, JavaScript/update p50/p95/p99/max, frame p50/p95/p99/max, frames over 16.67 ms, browser/GPU metadata, the measured physical SVG surface, and Long Tasks where the API is available.
+For every case the benchmark records DOM-node range, JavaScript/update p50/p95/p99/max, requestAnimationFrame interval p50/p95/p99/max, frames over the nominal 60 fps budget, frames over the bounded p95 timing limit, browser/GPU metadata, the measured physical SVG surface, and Long Tasks where the API is available.
+
+`frames_over_16_67_ms` remains a raw diagnostic counter. It is deliberately **not** an acceptance count: a normal 60 Hz WebView can report callback intervals such as 16.7–16.8 ms because rAF follows the display/VSync cadence and timestamps are quantized. Renderer work and callback cadence therefore have separate acceptance limits below.
 
 ## Diagnostic browser run
 
@@ -43,20 +45,25 @@ Security and measurement properties:
 - during measurement all benchmark controls/results are hidden and the SVG occupies the entire WebView client area;
 - each culled acceptance result must itself record a physical SVG stage of at least **3840 × 2160**. A 4K window containing a smaller measured stage is rejected as incomplete evidence.
 
-Enter the machine model and useful hardware notes before the run. The generated JSON report contains native client/monitor metadata, browser/WebView user-agent data, GPU information when exposed by WebGL, all four benchmark cases, and the mechanical performance verdict. Copy that JSON into the renderer benchmark record together with any additional Windows/GPU-driver/power-mode information needed for the representative-hardware review.
+Enter the machine model and useful hardware notes before the run. The generated JSON report contains native client/monitor metadata, browser/WebView user-agent data, GPU information when exposed by WebGL, all four benchmark cases, the mechanical performance criteria and the mechanical performance verdict. Copy that JSON into the renderer benchmark record together with any additional Windows/GPU-driver/power-mode information needed for the representative-hardware review.
 
 ## Acceptance gate
 
 CI timings and ordinary browser runs are trend/diagnostic data only. The renderer decision must be made on representative Windows hardware in the intended Tauri/WebView2 stack at native 3840 × 2160 output.
 
+The target remains **60 fps**. The benchmark separates renderer work from rAF/VSync scheduling so a timer-rounded 60 Hz callback interval cannot by itself reject an otherwise healthy renderer.
+
 SVG passes the measured performance portion of ADR-019 only if **both culled 5k and culled 20k** cases demonstrate:
 
 - physical measured SVG surface at least 3840 × 2160;
-- p95 frame time at or below **16.67 ms**;
+- `update_ms_p95` at or below the strict 60 fps work budget `1000 / 60 = 16.667 ms`;
+- rAF `frame_ms_p95` at or below `17.500 ms`, derived from the same 60 fps target plus a bounded **5% timing tolerance** for VSync cadence/timestamp quantization;
 - no observed recurring Long Tasks during pan;
 - viewport-bounded DOM population (current guard: at most 1,500 scene nodes), rather than growth proportional to total document size.
 
-Missing culled evidence, unavailable Long Task evidence, invalid timings, or a sub-4K measured stage produces `measurement_incomplete`. Material p95/Long-Task/DOM misses produce `fallback_required`. A `performance_gate_pass` is **not by itself the final renderer decision**: correctness/fidelity evidence and representative-hardware review still have to be accepted.
+The 5% rAF tolerance is not additional renderer work budget. The measured DOM/update work must still fit inside 16.667 ms. A material callback-cadence miss such as 19.2 ms therefore still fails, while a normal timer-rounded 60 Hz p95 such as 16.8 ms does not fail solely because it is numerically above 16.67 ms.
+
+Missing culled evidence, unavailable Long Task evidence, non-finite update/frame timings, or a sub-4K measured stage produces `measurement_incomplete`. Material update/frame-p95, Long-Task or DOM misses produce `fallback_required`. A `performance_gate_pass` is **not by itself the final renderer decision**: correctness/fidelity evidence and representative-hardware review still have to be accepted.
 
 If the culled 20k case misses materially or behaves inconsistently across representative Windows hardware, the renderer abstraction remains in place and Canvas2D/WebGL or the Qt fallback is benchmarked before SVG is promoted to production.
 

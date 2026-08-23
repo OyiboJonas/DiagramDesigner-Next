@@ -7,11 +7,25 @@ export const BENCHMARK_COUNTS = Object.freeze([5000, 20000]);
 export const BENCHMARK_MODES = Object.freeze(['culled', 'full']);
 export const BENCHMARK_FRAMES = 120;
 export const CULLED_DOM_NODE_LIMIT = 1500;
-export const FRAME_BUDGET_MS = 16.67;
+export const TARGET_FPS = 60;
+export const FRAME_BUDGET_MS = 1000 / TARGET_FPS;
+export const FRAME_P95_TIMING_TOLERANCE = 0.05;
+export const FRAME_P95_LIMIT_MS = Number(
+  (FRAME_BUDGET_MS * (1 + FRAME_P95_TIMING_TOLERANCE)).toFixed(3),
+);
+export const UPDATE_P95_LIMIT_MS = FRAME_BUDGET_MS;
 
+const RAW_FRAME_16_67_MS = 16.67;
 const COLUMNS = 100;
 const CELL = Object.freeze({ width: 30, height: 22 });
 const CULL_MARGIN = 12;
+const PERFORMANCE_CRITERIA = Object.freeze({
+  targetFps: TARGET_FPS,
+  updateP95LimitMs: UPDATE_P95_LIMIT_MS,
+  frameP95LimitMs: FRAME_P95_LIMIT_MS,
+  frameP95TimingTolerance: FRAME_P95_TIMING_TOLERANCE,
+  culledDomNodeLimit: CULLED_DOM_NODE_LIMIT,
+});
 
 export function evaluateRendererBenchmark({ environment, results } = {}) {
   const normalizedResults = Array.isArray(results) ? results : [];
@@ -47,9 +61,9 @@ export function evaluateRendererBenchmark({ environment, results } = {}) {
       continue;
     }
 
-    const stageWidth = Number(result.stage_physical_px?.width);
-    const stageHeight = Number(result.stage_physical_px?.height);
-    if (!Number.isFinite(stageWidth) || !Number.isFinite(stageHeight)) {
+    const stageWidth = finiteMeasurement(result.stage_physical_px?.width);
+    const stageHeight = finiteMeasurement(result.stage_physical_px?.height);
+    if (stageWidth === null || stageHeight === null) {
       reasons.push(`culled ${count.toLocaleString('en-US')} has no finite stage physical area`);
     } else if (
       stageWidth < TARGET_PHYSICAL_PX.width ||
@@ -60,12 +74,21 @@ export function evaluateRendererBenchmark({ environment, results } = {}) {
       );
     }
 
-    const p95 = Number(result.frame_ms_p95);
-    if (!Number.isFinite(p95)) {
-      reasons.push(`culled ${count.toLocaleString('en-US')} has no finite frame p95`);
-    } else if (p95 > FRAME_BUDGET_MS) {
+    const updateP95 = finiteMeasurement(result.update_ms_p95);
+    if (updateP95 === null) {
+      reasons.push(`culled ${count.toLocaleString('en-US')} has no finite update p95`);
+    } else if (updateP95 > UPDATE_P95_LIMIT_MS) {
       reasons.push(
-        `culled ${count.toLocaleString('en-US')} frame p95 ${p95.toFixed(3)} ms exceeds ${FRAME_BUDGET_MS} ms`,
+        `culled ${count.toLocaleString('en-US')} update p95 ${updateP95.toFixed(3)} ms exceeds 60 fps work budget ${UPDATE_P95_LIMIT_MS.toFixed(3)} ms`,
+      );
+    }
+
+    const frameP95 = finiteMeasurement(result.frame_ms_p95);
+    if (frameP95 === null) {
+      reasons.push(`culled ${count.toLocaleString('en-US')} has no finite frame p95`);
+    } else if (frameP95 > FRAME_P95_LIMIT_MS) {
+      reasons.push(
+        `culled ${count.toLocaleString('en-US')} frame p95 ${frameP95.toFixed(3)} ms exceeds 60 fps timing limit ${FRAME_P95_LIMIT_MS.toFixed(3)} ms (5% rAF/VSync tolerance)`,
       );
     }
 
@@ -77,8 +100,8 @@ export function evaluateRendererBenchmark({ environment, results } = {}) {
       );
     }
 
-    const domMax = Number(result.dom_nodes_max);
-    if (!Number.isFinite(domMax)) {
+    const domMax = finiteMeasurement(result.dom_nodes_max);
+    if (domMax === null) {
       reasons.push(`culled ${count.toLocaleString('en-US')} has no finite DOM maximum`);
     } else if (domMax > CULLED_DOM_NODE_LIMIT) {
       reasons.push(
@@ -103,7 +126,7 @@ export function evaluateRendererBenchmark({ environment, results } = {}) {
   }
 
   return freezeVerdict('performance_gate_pass', true, [
-    'culled 5k and 20k satisfy the measured ADR-019 performance conditions',
+    'culled 5k and 20k keep update p95 inside the 60 fps work budget and frame p95 inside the bounded rAF/VSync timing tolerance',
     'final renderer acceptance still requires the corresponding correctness/fidelity evidence and representative-hardware review',
   ]);
 }
@@ -198,7 +221,10 @@ export async function runSvgDomCase({
     frame_ms_p95: percentile(frameMs, 0.95),
     frame_ms_p99: percentile(frameMs, 0.99),
     frame_ms_max: Math.max(...frameMs),
-    frames_over_16_67_ms: frameMs.filter((value) => value > FRAME_BUDGET_MS).length,
+    frame_budget_ms: FRAME_BUDGET_MS,
+    frame_p95_limit_ms: FRAME_P95_LIMIT_MS,
+    frames_over_16_67_ms: frameMs.filter((value) => value > RAW_FRAME_16_67_MS).length,
+    frames_over_p95_limit_ms: frameMs.filter((value) => value > FRAME_P95_LIMIT_MS).length,
     long_tasks_observed: observer ? longTasks : null,
     generated_at: new Date().toISOString(),
   });
@@ -212,8 +238,15 @@ function freezeVerdict(status, performancePass, reasons) {
   return Object.freeze({
     status,
     performancePass,
+    criteria: PERFORMANCE_CRITERIA,
     reasons: Object.freeze([...reasons]),
   });
+}
+
+function finiteMeasurement(value) {
+  if (value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function validateCase(count, mode, svg, scene, windowRef, documentRef) {
