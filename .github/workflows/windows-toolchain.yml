@@ -16,3 +16,20 @@ jobs:
       - name: Validate hosted Windows MSVC discovery
         shell: powershell
         run: .\benchmarks\phase-1\check-windows-toolchain.ps1 -SkipCompileCheck
+      - name: Verify Tauri build keeps the source tree clean
+        shell: powershell
+        run: |
+          cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tauri compile check failed."
+          }
+          $dirty = @(git status --porcelain --untracked-files=normal)
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to inspect the Git working tree after the Tauri compile check."
+          }
+          if ($dirty.Count -ne 0) {
+            Write-Host "Tauri compile check changed the source tree:"
+            $dirty | ForEach-Object { Write-Host $_ }
+            throw "Tauri builds must not make a clean checkout dirty."
+          }
+          Write-Host "Tauri compile check left the source tree clean."
