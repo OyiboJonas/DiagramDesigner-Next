@@ -1,0 +1,179 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: light dark;
+  --bg: #f4f5f7;
+  --panel: rgba(255, 255, 255, 0.96);
+  --surface: #ffffff;
+  --surface-subtle: #eef0f3;
+  --text: #191b1f;
+  --muted: #686d76;
+  --border: rgba(25, 27, 31, 0.14);
+  --accent: #315b9a;
+  --accent-contrast: #ffffff;
+  --good: #1f7a45;
+  --bad: #a23737;
+  --warn: #8a6712;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17191d;
+    --panel: rgba(31, 34, 40, 0.97);
+    --surface: #24272d;
+    --surface-subtle: #1d2025;
+    --text: #f2f4f7;
+    --muted: #a8aeb8;
+    --border: rgba(255, 255, 255, 0.12);
+    --accent: #86aee8;
+    --accent-contrast: #13243d;
+    --good: #6bc892;
+    --bad: #ef8a8a;
+    --warn: #e4c168;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-rows: 60px minmax(0, 1fr) 220px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button, input, textarea { font: inherit; }
+button {
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+button:disabled { cursor: wait; opacity: 0.55; }
+button.primary { border-color: transparent; background: var(--accent); color: var(--accent-contrast); }
+
+.benchmark-toolbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.benchmark-toolbar strong, .benchmark-toolbar span { display: block; }
+.benchmark-toolbar strong { font-size: 14px; }
+.benchmark-toolbar span { margin-top: 2px; color: var(--muted); font-size: 11px; }
+.benchmark-actions { display: flex; gap: 8px; }
+
+.benchmark-panel {
+  grid-row: 2 / 4;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+}
+.eligibility {
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+  font-size: 12px;
+  font-weight: 700;
+}
+.eligibility[data-state="eligible"] { color: var(--good); }
+.eligibility[data-state="ineligible"] { color: var(--bad); }
+.eligibility[data-state="incomplete"] { color: var(--warn); }
+
+.environment-facts { margin: 14px 0 18px; }
+.environment-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.environment-facts dt { color: var(--muted); }
+.environment-facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+.metadata-field { display: grid; gap: 6px; margin: 12px 0; }
+.metadata-field span { color: var(--muted); font-size: 11px; }
+.metadata-field input {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+#run-suite { width: 100%; margin-top: 8px; }
+.gate-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+.benchmark-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+}
+.benchmark-stage svg { display: block; width: 100%; height: 100%; color: var(--text); }
+.progress {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* During a measurement the SVG itself owns the complete WebView client area.
+   This is required so a 3840×2160 fullscreen client really produces a native
+   3840×2160 render surface instead of benchmarking a smaller stage beside UI. */
+body[data-benchmark-running="true"] .benchmark-toolbar,
+body[data-benchmark-running="true"] .benchmark-panel,
+body[data-benchmark-running="true"] .result-panel {
+  visibility: hidden;
+}
+body[data-benchmark-running="true"] .benchmark-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  width: 100vw;
+  height: 100vh;
+}
+body[data-benchmark-running="true"] .progress {
+  display: none;
+}
+
+.result-panel {
+  min-width: 0;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+#result {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  padding: 12px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+}

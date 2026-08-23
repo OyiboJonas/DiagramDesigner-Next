@@ -1,0 +1,17 @@
+.page-surface:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.candidate-svg-document [data-element-id][tabindex="0"]:focus-visible {
+  outline: none;
+  filter:
+    drop-shadow(0 0 1.6px var(--selection))
+    drop-shadow(0 0 3.2px var(--selection));
+}
+
+.candidate-svg-document [data-element-id][aria-selected="true"] {
+  filter:
+    drop-shadow(0 0 1.2px var(--selection))
+    drop-shadow(0 0 2.4px var(--selection));
+}

@@ -1,0 +1,13 @@
+[package]
+name = "legacy-migrate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+legacy-ddd = { path = "../legacy-ddd" }
+next-domain = { path = "../next-domain" }
+sha2.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

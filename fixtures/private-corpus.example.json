@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {
+      "name": "private-reference.ddd",
+      "path": "../private-fixtures/private-reference.ddd",
+      "source_sha256": "<64-character-source-sha256>",
+      "next_sha256": null
+    }
+  ]
+}

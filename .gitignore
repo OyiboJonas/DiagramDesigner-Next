@@ -1,0 +1,13 @@
+/target
+**/target
+/benchmark-results/
+/private-fixtures/
+fixtures/private-corpus.local.json
+fixtures/*.private.json
+*.private.json
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+.env
+.env.*

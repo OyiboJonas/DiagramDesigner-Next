@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>DiagramDesigner Next</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="keyboard.css" />
+    <script src="app.js" type="module"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand" aria-label="DiagramDesigner Next">
+          <span class="brand-mark" aria-hidden="true">DD</span>
+          <div>
+            <strong>DiagramDesigner Next</strong>
+            <span class="phase-label">Phase 1 desktop shell</span>
+          </div>
+        </div>
+
+        <nav class="toolbar" aria-label="Document and canvas actions">
+          <button id="new-document" type="button">New</button>
+          <button id="open-document" type="button">Open…</button>
+          <button id="save-document" class="primary" type="button">Save</button>
+          <span class="toolbar-separator" aria-hidden="true"></span>
+          <button id="undo" type="button">Undo</button>
+          <button id="redo" type="button">Redo</button>
+          <span class="toolbar-separator" aria-hidden="true"></span>
+          <button id="toggle-grid" class="toggle-button" type="button" aria-pressed="true">Grid</button>
+          <button id="toggle-snap" class="toggle-button" type="button" aria-pressed="true">Snap</button>
+          <span class="toolbar-separator" aria-hidden="true"></span>
+          <button id="renderer-benchmark" type="button" title="Open the isolated ADR-019 native renderer benchmark">4K benchmark</button>
+        </nav>
+      </header>
+
+      <section class="workspace">
+        <aside class="document-panel" aria-label="Document state">
+          <h1 id="document-name">Untitled</h1>
+          <p id="document-path" class="document-path">Not saved yet</p>
+
+          <dl class="session-facts">
+            <div>
+              <dt>Status</dt>
+              <dd id="document-dirty">Saved</dd>
+            </div>
+            <div>
+              <dt>Pages</dt>
+              <dd id="page-count">1</dd>
+            </div>
+            <div>
+              <dt>History</dt>
+              <dd id="history-state">0</dd>
+            </div>
+          </dl>
+
+          <p id="renderer-stats" class="renderer-stats">Candidate renderer awaiting desktop runtime.</p>
+
+          <p class="boundary-note">
+            File access is owned by the Rust desktop boundary. The WebView has no generic filesystem permission.
+            Pointer movement, snapping and keyboard focus remain local to the presentation surface; only semantic selection and completed moves cross IPC.
+            Tab enters or leaves the canvas; arrow keys, Home and End navigate elements; Space or Enter selects; Escape clears selection.
+          </p>
+        </aside>
+
+        <section class="canvas-stage" aria-label="Editor canvas">
+          <div class="canvas-scroll-content">
+            <div class="page-frame">
+              <div class="ruler-corner" aria-hidden="true">mm</div>
+              <div id="ruler-x" class="ruler ruler-x" aria-hidden="true"></div>
+              <div id="ruler-y" class="ruler ruler-y" aria-hidden="true"></div>
+              <div id="canvas-page" class="page-surface" aria-label="Active diagram page" data-grid-visible="true">
+                <div class="page-placeholder-copy">
+                  <strong>Renderer surface</strong>
+                  <span>The desktop candidate presentation is loaded by the Tauri runtime.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <footer class="statusbar">
+        <span id="status-message" role="status" aria-live="polite">Ready</span>
+        <span class="status-tech">Tauri 2 · DDNX · renderer candidate</span>
+      </footer>
+    </main>
+
+    <dialog id="recovery-dialog" class="recovery-dialog" aria-labelledby="recovery-title">
+      <div class="recovery-dialog-content">
+        <span class="recovery-kicker">Crash recovery</span>
+        <h2 id="recovery-title">A recovery snapshot is available</h2>
+        <p>
+          DiagramDesigner Next found editor state that was not confirmed as a normal document save.
+          Restore it as an unsaved copy, or discard the snapshot and keep the clean startup document.
+        </p>
+        <p class="recovery-safety-note">
+          Restoring never overwrites the original file. The recovered copy has no save target until you explicitly save it.
+        </p>
+        <div class="recovery-actions">
+          <button id="recovery-discard" type="button">Discard snapshot</button>
+          <button id="recovery-restore" class="primary" type="button">Restore unsaved copy</button>
+        </div>
+      </div>
+    </dialog>
+  </body>
+</html>

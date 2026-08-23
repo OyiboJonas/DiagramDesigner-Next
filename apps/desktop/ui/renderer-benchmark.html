@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>DiagramDesigner Next — Native renderer benchmark</title>
+    <link rel="stylesheet" href="renderer-benchmark.css" />
+    <script src="renderer-benchmark.js" type="module"></script>
+  </head>
+  <body>
+    <header class="benchmark-toolbar">
+      <div>
+        <strong>ADR-019 native renderer benchmark</strong>
+        <span>Tauri / WebView2 / physical 3840×2160 gate</span>
+      </div>
+      <div class="benchmark-actions">
+        <button id="copy-result" type="button" disabled>Copy JSON</button>
+        <button id="close-benchmark" type="button">Close</button>
+      </div>
+    </header>
+
+    <aside class="benchmark-panel" aria-label="Benchmark metadata and controls">
+      <div id="eligibility" class="eligibility" role="status">Checking native environment…</div>
+
+      <dl id="environment" class="environment-facts"></dl>
+
+      <label class="metadata-field">
+        <span>Machine model / target hardware</span>
+        <input id="machine-model" type="text" autocomplete="off" placeholder="e.g. Surface Laptop …" />
+      </label>
+      <label class="metadata-field">
+        <span>Hardware notes</span>
+        <input id="hardware-notes" type="text" autocomplete="off" placeholder="GPU / driver / power mode / other notes" />
+      </label>
+
+      <button id="run-suite" class="primary" type="button">Run ADR-019 suite</button>
+      <p class="gate-note">
+        The performance verdict uses only the culled 5k and 20k cases. Full-DOM runs are diagnostic.
+        A completed native suite is retained atomically by the Rust backend with its build-source identity;
+        Copy JSON remains a secondary/manual export. A performance pass is not the final renderer decision
+        until the corresponding correctness/fidelity evidence and representative-hardware review are also confirmed.
+      </p>
+    </aside>
+
+    <main id="stage" class="benchmark-stage" aria-label="SVG benchmark stage">
+      <svg id="diagram" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" preserveAspectRatio="none">
+        <g id="scene"></g>
+      </svg>
+      <div id="progress" class="progress" aria-live="polite">Ready</div>
+    </main>
+
+    <section class="result-panel" aria-label="Benchmark result">
+      <textarea id="result" readonly spellcheck="false" aria-label="Benchmark JSON result"></textarea>
+    </section>
+  </body>
+</html>

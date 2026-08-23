@@ -1,0 +1,13 @@
+[package]
+name = "app-core"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[dependencies]
+ddnx = { path = "../ddnx" }
+editor-core = { path = "../editor-core" }
+editor-runtime = { path = "../editor-runtime" }
+next-domain = { path = "../next-domain" }
+thiserror = "2.0"

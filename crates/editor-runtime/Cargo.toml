@@ -1,0 +1,12 @@
+[package]
+name = "editor-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+editor-core = { path = "../editor-core" }
+next-domain = { path = "../next-domain" }
+render-plan = { path = "../render-plan" }
+thiserror.workspace = true

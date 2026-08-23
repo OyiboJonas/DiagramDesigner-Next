@@ -1,0 +1,64 @@
+[[permission]]
+identifier = "allow-document-state"
+description = "Allows the main editor window to read non-sensitive document session state."
+commands.allow = ["document_state"]
+
+[[permission]]
+identifier = "allow-candidate-page-presentation"
+description = "Allows the main editor window to request the current page through the renderer-candidate presentation boundary."
+commands.allow = ["candidate_page_presentation"]
+
+[[permission]]
+identifier = "allow-set-selection"
+description = "Allows the main editor window to update transient editor selection without mutating persistent document state."
+commands.allow = ["set_selection"]
+
+[[permission]]
+identifier = "allow-new-document"
+description = "Allows the main editor window to create a new in-memory document when no unsaved changes would be discarded."
+commands.allow = ["new_document"]
+
+[[permission]]
+identifier = "allow-open-document"
+description = "Allows the Rust backend to show a native DDNX picker and open only the user-selected document."
+commands.allow = ["open_document"]
+
+[[permission]]
+identifier = "allow-save-document"
+description = "Allows the Rust backend to save the current document through the verified DDNX and atomic filesystem boundary."
+commands.allow = ["save_document"]
+
+[[permission]]
+identifier = "allow-undo"
+description = "Allows one semantic Undo operation in the current editor session."
+commands.allow = ["undo"]
+
+[[permission]]
+identifier = "allow-redo"
+description = "Allows one semantic Redo operation in the current editor session."
+commands.allow = ["redo"]
+
+[[permission]]
+identifier = "allow-commit-move-elements"
+description = "Allows a completed frontend drag gesture to commit one typed MoveElements command."
+commands.allow = ["commit_move_elements"]
+
+[[permission]]
+identifier = "allow-open-renderer-benchmark"
+description = "Allows the main editor window to open or focus the dedicated ADR-019 renderer benchmark window."
+commands.allow = ["open_renderer_benchmark"]
+
+[[permission]]
+identifier = "allow-renderer-benchmark-environment"
+description = "Allows only the dedicated renderer benchmark window to read its physical client, monitor and source-build metadata."
+commands.allow = ["renderer_benchmark_environment"]
+
+[[permission]]
+identifier = "allow-persist-renderer-benchmark-evidence"
+description = "Allows only the dedicated renderer benchmark window to submit one validated ADR-019 report for Rust-owned atomic evidence storage."
+commands.allow = ["persist_renderer_benchmark_evidence"]
+
+[[permission]]
+identifier = "allow-close-renderer-benchmark"
+description = "Allows only the dedicated renderer benchmark window to close itself."
+commands.allow = ["close_renderer_benchmark"]

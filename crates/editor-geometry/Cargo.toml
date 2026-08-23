@@ -1,0 +1,10 @@
+[package]
+name = "editor-geometry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+next-domain = { path = "../next-domain" }
+thiserror.workspace = true

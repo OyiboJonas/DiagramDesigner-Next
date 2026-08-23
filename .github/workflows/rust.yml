@@ -1,0 +1,201 @@
+name: Rust compatibility lab
+
+on:
+  push:
+    branches: [main, "agent/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked --workspace
+      - name: Application core format
+        run: cargo fmt --manifest-path crates/app-core/Cargo.toml -- --check
+      - name: Application core Clippy
+        run: cargo clippy --manifest-path crates/app-core/Cargo.toml --all-targets -- -D warnings
+      - name: Application core test
+        run: cargo test --manifest-path crates/app-core/Cargo.toml
+      - name: Platform filesystem format
+        run: cargo fmt --manifest-path crates/platform-fs/Cargo.toml -- --check
+      - name: Platform filesystem Clippy
+        run: cargo clippy --locked --manifest-path crates/platform-fs/Cargo.toml --all-targets -- -D warnings
+      - name: Platform filesystem test
+        run: cargo test --locked --manifest-path crates/platform-fs/Cargo.toml
+      - name: Desktop Rust format
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+      - name: Desktop shell JavaScript syntax
+        run: |
+          node --check apps/desktop/ui/app.js
+          node --check apps/desktop/ui/candidate-svg-surface.mjs
+          node --check apps/desktop/ui/candidate-svg-keyboard.mjs
+          node --check apps/desktop/ui/renderer-benchmark-core.mjs
+          node --check apps/desktop/ui/renderer-benchmark.js
+      - name: Render plan benchmark smoke
+        run: cargo run --locked --quiet -p render-plan --bin render-plan-bench -- 5000 20000
+      - name: Prepared cache benchmark smoke
+        run: cargo run --locked --quiet -p editor-runtime --bin prepared-cache-bench -- --rebuild-samples 3 --hit-samples 100 5000 20000
+      - name: Frontend interaction tests
+        run: node --test web/editor-interaction/*.test.mjs
+      - name: SVG benchmark syntax
+        run: node --check benchmarks/svg-dom/benchmark.js
+
+  windows-desktop:
+    name: Windows atomic persistence and Tauri shell
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Windows atomic filesystem tests
+        run: cargo test --locked --manifest-path crates/platform-fs/Cargo.toml
+      - name: Prepared cache evidence runner Windows smoke
+        run: .\benchmarks\prepared-cache\run-windows.ps1 -DebugBuild -RebuildSamples 1 -HitSamples 20 -OutputDirectory "$env:RUNNER_TEMP\prepared-cache-evidence"
+      - name: ADR-019 target runner Windows configuration smoke
+        run: .\benchmarks\adr-019\run-windows.ps1 -ValidateOnly -OutputDirectory "$env:RUNNER_TEMP\adr-019-evidence"
+      - name: Phase-1 combined target evidence runner configuration smoke
+        run: .\benchmarks\phase-1\run-target-evidence-windows.ps1 -ValidateOnly -OutputDirectory "$env:RUNNER_TEMP\phase-1-target-evidence"
+      - name: ADR-019 fidelity scene Windows configuration smoke
+        run: .\benchmarks\phase-1\export-fidelity-scene-windows.ps1 -ValidateOnly -OutputDirectory "$env:RUNNER_TEMP\phase-1-fidelity-evidence"
+      - name: Private corpus harness configuration smoke
+        run: .\benchmarks\private-ddd\prepare-private-corpus.ps1 -ValidateOnly -OutputDirectory "$env:RUNNER_TEMP\private-ddd-evidence"
+      - name: Phase-1 archived evidence verifier synthetic test
+        run: .\benchmarks\phase-1\test-evidence-verifier.ps1
+      - name: Tauri desktop locked configuration and compile check
+        run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Tauri desktop ADR-019 provenance tests
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+
+  upstream-palettes:
+    name: Upstream DDT corpus
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout DiagramDesigner Next
+        uses: actions/checkout@v4
+        with:
+          path: next
+      - name: Checkout pinned legacy reference
+        uses: actions/checkout@v4
+        with:
+          repository: meesoft/DiagramDesigner
+          ref: 12188325704b559c211addf82f26183098b0e201
+          path: upstream
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+      - name: Build migration inspector
+        working-directory: next
+        run: cargo build --locked --quiet -p dd-migrate
+      - name: Traverse, normalize text, convert and package every upstream template palette
+        shell: bash
+        run: |
+          set -euo pipefail
+          inspector="$GITHUB_WORKSPACE/next/target/debug/dd-migrate"
+          total=0
+          text_entries_total=0
+          object_text_entries_total=0
+          decode_errors_total=0
+          markup_diagnostics_total=0
+          symbol_glyphs_total=0
+          action_tails_total=0
+          hint_tails_total=0
+
+          while IFS= read -r -d '' file; do
+            total=$((total + 1))
+            report="$RUNNER_TEMP/ddt-report.json"
+            text_report="$RUNNER_TEMP/ddt-text.json"
+            converted="$RUNNER_TEMP/ddt-next.json"
+            native="$RUNNER_TEMP/ddt-$total.ddnx"
+            package_report="$RUNNER_TEMP/ddt-package.txt"
+            error="$RUNNER_TEMP/ddt-error.txt"
+            rm -f "$native"
+
+            if "$inspector" inspect "$file" >"$report" 2>"$error"; then
+              counts=$(jq -c '.template_summary.object_type_counts' "$report")
+              trailing=$(jq -r '.template_summary.trailing_bytes' "$report")
+            else
+              printf 'FAIL inspect %s\n' "${file#*/TemplatePalettes/}" >&2
+              cat "$error" >&2
+              exit 1
+            fi
+
+            if "$inspector" text "$file" >"$text_report" 2>"$error"; then
+              text_entries=$(jq -r '.summary.entries' "$text_report")
+              object_text_entries=$(jq -r '.summary.object_text_entries' "$text_report")
+              decode_errors=$(jq -r '.summary.decode_error_entries' "$text_report")
+              markup_diagnostics=$(jq -r '.summary.markup_diagnostics' "$text_report")
+              symbol_glyphs=$(jq '[.entries[] | .rich_text? | select(. != null) | .tokens[]? | select(.kind == "symbol_glyph")] | length' "$text_report")
+              action_tails=$(jq '[.entries[] | .rich_text? | select(. != null) | .tail? | select(.kind == "action")] | length' "$text_report")
+              hint_tails=$(jq '[.entries[] | .rich_text? | select(. != null) | .tail? | select(.kind == "hint")] | length' "$text_report")
+
+              text_entries_total=$((text_entries_total + text_entries))
+              object_text_entries_total=$((object_text_entries_total + object_text_entries))
+              decode_errors_total=$((decode_errors_total + decode_errors))
+              markup_diagnostics_total=$((markup_diagnostics_total + markup_diagnostics))
+              symbol_glyphs_total=$((symbol_glyphs_total + symbol_glyphs))
+              action_tails_total=$((action_tails_total + action_tails))
+              hint_tails_total=$((hint_tails_total + hint_tails))
+            else
+              printf 'FAIL text normalization %s\n' "${file#*/TemplatePalettes/}" >&2
+              cat "$error" >&2
+              exit 1
+            fi
+
+            if "$inspector" convert "$file" >"$converted" 2>"$error"; then
+              schema=$(jq -r '.schema_version' "$converted")
+              kind=$(jq -r '.artifact.kind' "$converted")
+              if [[ "$schema" != "1" || "$kind" != "template_palette" ]]; then
+                printf 'FAIL domain %s schema=%s kind=%s\n' "${file#*/TemplatePalettes/}" "$schema" "$kind" >&2
+                exit 1
+              fi
+              elements=$(jq -r '.artifact.value.scene.elements | length' "$converted")
+            else
+              printf 'FAIL convert %s\n' "${file#*/TemplatePalettes/}" >&2
+              cat "$error" >&2
+              exit 1
+            fi
+
+            if "$inspector" convert "$file" --output "$native" >"$package_report" 2>"$error" \
+              && "$inspector" verify-ddnx "$native" >>"$package_report" 2>>"$error"; then
+              package_bytes=$(stat -c%s "$native")
+              printf 'OK  %s  types=%s trailing=%s text=%s object-text=%s decode-errors=%s markup-diagnostics=%s symbol-glyphs=%s action-tails=%s hint-tails=%s next-elements=%s ddnx-bytes=%s\n' \
+                "${file#*/TemplatePalettes/}" "$counts" "$trailing" "$text_entries" "$object_text_entries" "$decode_errors" "$markup_diagnostics" "$symbol_glyphs" "$action_tails" "$hint_tails" "$elements" "$package_bytes"
+            else
+              printf 'FAIL DDNX round-trip %s\n' "${file#*/TemplatePalettes/}" >&2
+              cat "$package_report" >&2 || true
+              cat "$error" >&2 || true
+              exit 1
+            fi
+            rm -f "$native"
+          done < <(find "$GITHUB_WORKSPACE/upstream/TemplatePalettes" -type f -name '*.ddt' -print0 | sort -z)
+
+          echo "Validated, text-normalized, converted and DDNX-round-tripped $total pinned upstream DDT palettes."
+          printf 'TEXT-CORPUS palettes=%s entries=%s object-text=%s decode-errors=%s markup-diagnostics=%s symbol-glyphs=%s action-tails=%s hint-tails=%s\n' \
+            "$total" "$text_entries_total" "$object_text_entries_total" "$decode_errors_total" "$markup_diagnostics_total" "$symbol_glyphs_total" "$action_tails_total" "$hint_tails_total"
+
+          if [[ "$total" -ne 30 \
+             || "$text_entries_total" -ne 4031 \
+             || "$object_text_entries_total" -ne 453 \
+             || "$decode_errors_total" -ne 0 \
+             || "$markup_diagnostics_total" -ne 0 \
+             || "$symbol_glyphs_total" -ne 11 \
+             || "$action_tails_total" -ne 2 \
+             || "$hint_tails_total" -ne 0 ]]; then
+            echo "FAIL pinned upstream text-corpus regression changed" >&2
+            exit 1
+          fi

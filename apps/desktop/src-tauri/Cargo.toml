@@ -1,0 +1,26 @@
+[package]
+name = "diagram-designer-next-desktop"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[lib]
+name = "diagram_designer_next_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = "=2.6.3"
+
+[dependencies]
+app-core = { path = "../../../crates/app-core" }
+ddnx = { path = "../../../crates/ddnx" }
+editor-runtime = { path = "../../../crates/editor-runtime" }
+next-domain = { path = "../../../crates/next-domain" }
+platform-fs = { path = "../../../crates/platform-fs" }
+render-plan = { path = "../../../crates/render-plan" }
+render-svg = { path = "../../../crates/render-svg" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+tauri = "=2.11.5"
+tauri-plugin-dialog = "=2.7.2"

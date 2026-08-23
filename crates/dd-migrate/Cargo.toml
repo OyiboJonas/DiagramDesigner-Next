@@ -1,0 +1,21 @@
+[package]
+name = "dd-migrate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "dd-migrate"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+ddnx = { path = "../ddnx" }
+legacy-ddd = { path = "../legacy-ddd" }
+legacy-migrate = { path = "../legacy-migrate" }
+next-domain = { path = "../next-domain" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true

@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "renderer-benchmark",
+  "description": "Dedicated ADR-019 renderer benchmark capability. The benchmark window can inspect only its own native environment, atomically persist validated benchmark evidence, and close itself.",
+  "windows": ["renderer-benchmark"],
+  "permissions": [
+    "allow-renderer-benchmark-environment",
+    "allow-persist-renderer-benchmark-evidence",
+    "allow-close-renderer-benchmark"
+  ]
+}
