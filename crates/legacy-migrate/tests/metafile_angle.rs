@@ -47,7 +47,7 @@ fn converts_legacy_metafile_radians_to_next_degrees_without_touching_source_byte
         panic!("expected template palette");
     };
     let element = &template.scene.elements[0];
-    assert!(matches!(element.kind, ElementKind::Metafile { .. }));
+    assert!(matches!(&element.kind, ElementKind::Metafile { .. }));
     assert!((element.rotation_deg - 90.0).abs() < 1.0e-4);
     assert_eq!(
         element
@@ -59,13 +59,13 @@ fn converts_legacy_metafile_radians_to_next_degrees_without_touching_source_byte
         Some(&(FRAC_PI_2.to_bits() as i64))
     );
 
-    let ElementKind::Metafile { asset_id } = element.kind else {
+    let ElementKind::Metafile { asset_id } = &element.kind else {
         unreachable!();
     };
     let asset = template
         .assets
         .iter()
-        .find(|asset| asset.id == asset_id)
+        .find(|asset| asset.id == *asset_id)
         .unwrap();
     assert_eq!(
         asset.payload,
