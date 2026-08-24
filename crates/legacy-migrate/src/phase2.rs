@@ -58,7 +58,7 @@ fn normalize_legacy_metafile_rotations(artifact: &mut NextArtifact) {
 
 fn normalize_scene(scene: &mut Scene) {
     for element in &mut scene.elements {
-        if !matches!(element.kind, ElementKind::Metafile { .. }) {
+        if !matches!(&element.kind, ElementKind::Metafile { .. }) {
             continue;
         }
 
