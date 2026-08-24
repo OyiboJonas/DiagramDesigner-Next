@@ -259,7 +259,7 @@ fn render_reference_fragment(
     fragment.push('>');
     write!(
         fragment,
-        "<svg x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\" preserveAspectRatio=\"none\" overflow=\"visible\">{}\</svg></g>",
+        "<svg x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\" preserveAspectRatio=\"none\" overflow=\"visible\">{}</svg></g>",
         num(bounds.x),
         num(bounds.y),
         num(bounds.width),
