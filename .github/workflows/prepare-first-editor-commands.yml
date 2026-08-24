@@ -1,0 +1,45 @@
+name: Prepare first desktop editor commands
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.head_ref == 'desktop-first-editor-commands'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-first-editor-commands
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Apply first editor command slice
+        run: python scripts/prepare-first-editor-commands.py
+      - name: Format Rust
+        run: cargo fmt --all
+      - name: Verify application core
+        run: cargo test --locked -p app-core
+      - name: Verify desktop JavaScript
+        run: node --check apps/desktop/ui/app.js
+      - name: Verify working tree patch
+        run: git diff --check
+      - name: Commit prepared implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm scripts/prepare-first-editor-commands.py
+          rm .github/workflows/prepare-first-editor-commands.yml
+          git config user.name "DiagramDesigner Next automation"
+          git config user.email "190651966+OyiboJonas@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Desktop: expose first constructive editor commands"
+          git push origin HEAD:desktop-first-editor-commands
