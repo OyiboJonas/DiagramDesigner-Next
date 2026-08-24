@@ -1,5 +1,7 @@
+mod cull_bounds;
 mod prepared;
 pub use prepared::{PreparedPage, PreparedPageOptions, PreparedPageStats};
+pub(crate) use cull_bounds::element_cull_bounds;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -239,7 +241,9 @@ impl<'a> PlanState<'a> {
             return false;
         };
         let expanded = expand_rect(viewport, self.options.cull_margin_mm);
-        let bounds = rotated_aabb(element.bounds_mm, element.rotation_deg);
+        let Some(bounds) = element_cull_bounds(element) else {
+            return true;
+        };
         !rects_intersect(expanded, bounds)
     }
 }
