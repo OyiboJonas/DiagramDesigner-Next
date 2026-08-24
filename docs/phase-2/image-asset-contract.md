@@ -54,7 +54,8 @@ Public regression coverage must verify at least:
 - render-plan z-order with other facade/core primitives;
 - typed missing/unsupported/malformed asset diagnostics;
 - cold render-plan versus `PreparedPage` viewport equivalence;
-- deterministic fidelity-scene materialization of a small synthetic raster image.
+- deterministic fidelity-scene materialization of a small synthetic raster image;
+- workspace formatting and Clippy cleanliness on the pinned Rust 1.85 toolchain.
 
 No private `.ddd` fixture or private-corpus metadata is required or published for this work.
 
