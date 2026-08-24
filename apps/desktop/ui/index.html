@@ -16,7 +16,7 @@
           <span class="brand-mark" aria-hidden="true">DD</span>
           <div>
             <strong>DiagramDesigner Next</strong>
-            <span class="phase-label">Phase 1 desktop shell</span>
+            <span class="phase-label">Desktop editor preview</span>
           </div>
         </div>
 
@@ -60,6 +60,47 @@
           </dl>
 
           <p id="renderer-stats" class="renderer-stats">Candidate renderer awaiting desktop runtime.</p>
+
+          <section class="document-structure" aria-labelledby="document-structure-title">
+            <div class="document-structure-heading">
+              <h2 id="document-structure-title">Pages &amp; layers</h2>
+            </div>
+
+            <label class="property-field">
+              Page
+              <select id="page-select" aria-label="Active page"></select>
+            </label>
+            <div class="structure-actions">
+              <button id="add-page" type="button">New page</button>
+              <button id="delete-page" type="button">Delete page</button>
+            </div>
+            <form id="page-properties-form" class="structure-form" hidden>
+              <label class="property-field">Name <input id="page-name" required /></label>
+              <div class="property-grid">
+                <label>Width <input id="page-width" type="number" min="0.1" step="0.1" required /></label>
+                <label>Height <input id="page-height" type="number" min="0.1" step="0.1" required /></label>
+              </div>
+              <button id="apply-page-properties" type="submit">Apply page</button>
+            </form>
+
+            <label class="property-field structure-layer-field">
+              Layer
+              <select id="layer-select" aria-label="Active layer"></select>
+            </label>
+            <div class="structure-actions">
+              <button id="add-layer" type="button">New layer</button>
+              <button id="delete-layer" type="button">Delete layer</button>
+            </div>
+            <form id="layer-properties-form" class="structure-form" hidden>
+              <label class="property-field">Name <input id="layer-name" required /></label>
+              <div class="structure-checks">
+                <label><input id="layer-visible" type="checkbox" /> Visible</label>
+                <label><input id="layer-locked" type="checkbox" /> Locked</label>
+              </div>
+              <p id="layer-element-count" class="property-note"></p>
+              <button id="apply-layer-properties" type="submit">Apply layer</button>
+            </form>
+          </section>
 
           <section class="selection-inspector" aria-labelledby="selection-inspector-title">
             <div class="selection-inspector-heading">

@@ -15,6 +15,15 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "document_state",
+            "document_navigation",
+            "activate_page",
+            "activate_layer",
+            "create_page",
+            "delete_page",
+            "update_page_properties",
+            "create_layer",
+            "delete_layer",
+            "update_layer_properties",
             "candidate_page_presentation",
             "set_selection",
             "selection_properties",

@@ -248,10 +248,278 @@ struct ElementPropertiesDto {
     text_editable: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PageIdRequest {
+    page_id: PageId,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LayerIdRequest {
+    page_id: PageId,
+    layer_id: LayerId,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdatePagePropertiesRequest {
+    page_id: PageId,
+    name: String,
+    size_mm: Size,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateLayerPropertiesRequest {
+    page_id: PageId,
+    layer_id: LayerId,
+    name: String,
+    visible: bool,
+    locked: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DocumentNavigationDto {
+    state: DocumentStateDto,
+    pages: Vec<PageNavigationDto>,
+    active_page_id: Option<PageId>,
+    active_layer_id: Option<LayerId>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PageNavigationDto {
+    page_id: PageId,
+    name: String,
+    size_mm: Size,
+    layers: Vec<LayerNavigationDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LayerNavigationDto {
+    layer_id: LayerId,
+    name: String,
+    visible: bool,
+    locked: bool,
+    element_count: usize,
+}
+
 #[tauri::command]
 fn document_state(state: State<'_, DesktopState>) -> Result<DocumentStateDto, CommandError> {
     let document = lock_document(&state)?;
     Ok(document_state_dto(&document))
+}
+
+#[tauri::command]
+fn document_navigation(
+    state: State<'_, DesktopState>,
+) -> Result<DocumentNavigationDto, CommandError> {
+    let document = lock_document(&state)?;
+    Ok(document_navigation_dto(&document))
+}
+
+#[tauri::command]
+fn activate_page(
+    request: PageIdRequest,
+    state: State<'_, DesktopState>,
+) -> Result<DocumentNavigationDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    document
+        .session
+        .set_active_page(request.page_id)
+        .map_err(|error| CommandError::new("activate_page_failed", error.to_string()))?;
+    document.session.clear_selection();
+    Ok(document_navigation_dto(&document))
+}
+
+#[tauri::command]
+fn activate_layer(
+    request: LayerIdRequest,
+    state: State<'_, DesktopState>,
+) -> Result<DocumentNavigationDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    document
+        .session
+        .set_active_page_layer(request.page_id, request.layer_id)
+        .map_err(|error| CommandError::new("activate_layer_failed", error.to_string()))?;
+    document.session.clear_selection();
+    Ok(document_navigation_dto(&document))
+}
+
+#[tauri::command]
+fn create_page(state: State<'_, DesktopState>) -> Result<DocumentNavigationDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let (number, size_mm) = {
+        let session = document.session.session();
+        let size_mm = session
+            .active_page_id()
+            .and_then(|page_id| {
+                session
+                    .document()
+                    .pages
+                    .iter()
+                    .find(|page| page.id == page_id)
+                    .map(|page| page.size_mm)
+            })
+            .unwrap_or(Size {
+                width: 210.0,
+                height: 297.0,
+            });
+        (session.document().pages.len() + 1, size_mm)
+    };
+    let page = empty_page(format!("Page {number}"), size_mm);
+    let page_id = page.id;
+    let layer_id = page.layers[0].id;
+    document
+        .session
+        .create_page(page)
+        .map_err(|error| CommandError::new("page_create_failed", error.to_string()))?;
+    document
+        .session
+        .set_active_page(page_id)
+        .map_err(|error| CommandError::new("activate_page_failed", error.to_string()))?;
+    document
+        .session
+        .set_active_page_layer(page_id, layer_id)
+        .map_err(|error| CommandError::new("activate_layer_failed", error.to_string()))?;
+    document.session.clear_selection();
+    Ok(document_navigation_dto(&document))
+}
+
+#[tauri::command]
+fn delete_page(
+    request: PageIdRequest,
+    state: State<'_, DesktopState>,
+) -> Result<DocumentNavigationDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    if document.session.session().document().pages.len() <= 1 {
+        return Err(CommandError::new(
+            "last_page_delete_blocked",
+            "A document must keep at least one page.",
+        ));
+    }
+    document
+        .session
+        .delete_page(request.page_id)
+        .map_err(|error| CommandError::new("page_delete_failed", error.to_string()))?;
+    document.session.clear_selection();
+    Ok(document_navigation_dto(&document))
+}
+
+#[tauri::command]
+fn update_page_properties(
+    request: UpdatePagePropertiesRequest,
+    state: State<'_, DesktopState>,
+) -> Result<DocumentNavigationDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let name = structure_name(&request.name)?;
+    document
+        .session
+        .set_page_properties(request.page_id, name, request.size_mm)
+        .map_err(|error| CommandError::new("page_properties_failed", error.to_string()))?;
+    Ok(document_navigation_dto(&document))
+}
+
+#[tauri::command]
+fn create_layer(
+    request: PageIdRequest,
+    state: State<'_, DesktopState>,
+) -> Result<DocumentNavigationDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let number = document
+        .session
+        .session()
+        .document()
+        .pages
+        .iter()
+        .find(|page| page.id == request.page_id)
+        .ok_or_else(|| CommandError::new("page_missing", "The requested page no longer exists."))?
+        .layers
+        .len()
+        + 1;
+    let layer = empty_layer(format!("Layer {number}"));
+    let layer_id = layer.id;
+    document
+        .session
+        .create_page_layer(request.page_id, layer)
+        .map_err(|error| CommandError::new("layer_create_failed", error.to_string()))?;
+    document
+        .session
+        .set_active_page_layer(request.page_id, layer_id)
+        .map_err(|error| CommandError::new("activate_layer_failed", error.to_string()))?;
+    document.session.clear_selection();
+    Ok(document_navigation_dto(&document))
+}
+
+#[tauri::command]
+fn delete_layer(
+    request: LayerIdRequest,
+    state: State<'_, DesktopState>,
+) -> Result<DocumentNavigationDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let layer_count = document
+        .session
+        .session()
+        .document()
+        .pages
+        .iter()
+        .find(|page| page.id == request.page_id)
+        .ok_or_else(|| CommandError::new("page_missing", "The requested page no longer exists."))?
+        .layers
+        .len();
+    if layer_count <= 1 {
+        return Err(CommandError::new(
+            "last_layer_delete_blocked",
+            "A page must keep at least one local layer.",
+        ));
+    }
+    document
+        .session
+        .delete_page_layer(request.page_id, request.layer_id)
+        .map_err(|error| CommandError::new("layer_delete_failed", error.to_string()))?;
+    document.session.clear_selection();
+    Ok(document_navigation_dto(&document))
+}
+
+#[tauri::command]
+fn update_layer_properties(
+    request: UpdateLayerPropertiesRequest,
+    state: State<'_, DesktopState>,
+) -> Result<DocumentNavigationDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let name = structure_name(&request.name)?;
+    let draw_color = document
+        .session
+        .session()
+        .document()
+        .pages
+        .iter()
+        .find(|page| page.id == request.page_id)
+        .and_then(|page| {
+            page.layers
+                .iter()
+                .find(|layer| layer.id == request.layer_id)
+        })
+        .ok_or_else(|| CommandError::new("layer_missing", "The requested layer no longer exists."))?
+        .draw_color;
+    document
+        .session
+        .set_page_layer_properties(
+            request.page_id,
+            request.layer_id,
+            name,
+            request.visible,
+            request.locked,
+            draw_color,
+        )
+        .map_err(|error| CommandError::new("layer_properties_failed", error.to_string()))?;
+    if !request.visible {
+        document.session.clear_selection();
+    }
+    Ok(document_navigation_dto(&document))
 }
 
 #[tauri::command]
@@ -964,6 +1232,48 @@ fn commit_move_elements(
     Ok(document_state_dto(&document))
 }
 
+fn document_navigation_dto(document: &DesktopDocument) -> DocumentNavigationDto {
+    let session = document.session.session();
+    let pages = session
+        .document()
+        .pages
+        .iter()
+        .map(|page| PageNavigationDto {
+            page_id: page.id,
+            name: page.name.clone(),
+            size_mm: page.size_mm,
+            layers: page
+                .layers
+                .iter()
+                .map(|layer| LayerNavigationDto {
+                    layer_id: layer.id,
+                    name: layer.name.clone(),
+                    visible: layer.visible,
+                    locked: layer.locked,
+                    element_count: layer.scene.elements.len(),
+                })
+                .collect(),
+        })
+        .collect();
+    DocumentNavigationDto {
+        state: document_state_dto(document),
+        pages,
+        active_page_id: session.active_page_id(),
+        active_layer_id: document.session.active_page_layer_id(),
+    }
+}
+
+fn structure_name(value: &str) -> Result<String, CommandError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(CommandError::new(
+            "invalid_structure_name",
+            "Page and layer names must not be empty.",
+        ));
+    }
+    Ok(trimmed.to_owned())
+}
+
 fn element_edit_result_dto(document: &DesktopDocument) -> ElementEditResultDto {
     ElementEditResultDto {
         state: document_state_dto(document),
@@ -1228,33 +1538,39 @@ fn desktop_document_defaults() -> DocumentDefaults {
     }
 }
 
+fn empty_layer(name: String) -> Layer {
+    Layer {
+        id: LayerId::new(),
+        name,
+        visible: true,
+        locked: false,
+        draw_color: None,
+        scene: Scene::default(),
+    }
+}
+
+fn empty_page(name: String, size_mm: Size) -> Page {
+    Page {
+        id: PageId::new(),
+        name,
+        size_mm,
+        layers: vec![empty_layer("Layer 1".to_owned())],
+    }
+}
+
 fn blank_document_artifact() -> NextArtifact {
-    let page_id = PageId::new();
-    let layer_id = LayerId::new();
     NextArtifact::document(Document {
         id: DocumentId::new(),
         name: UNTITLED_DOCUMENT_NAME.to_owned(),
         defaults: desktop_document_defaults(),
         master_layers: Vec::new(),
-        pages: vec![Page {
-            id: page_id,
-            name: "Page 1".to_owned(),
-            size_mm: Size {
+        pages: vec![empty_page(
+            "Page 1".to_owned(),
+            Size {
                 width: 210.0,
                 height: 297.0,
             },
-            layers: vec![Layer {
-                id: layer_id,
-                name: "Layer 1".to_owned(),
-                visible: true,
-                locked: false,
-                draw_color: None,
-                scene: Scene {
-                    roots: Vec::new(),
-                    elements: Vec::new(),
-                },
-            }],
-        }],
+        )],
         styles: Vec::new(),
         assets: Vec::new(),
         import: None,
@@ -1269,6 +1585,15 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             document_state,
+            document_navigation,
+            activate_page,
+            activate_layer,
+            create_page,
+            delete_page,
+            update_page_properties,
+            create_layer,
+            delete_layer,
+            update_layer_properties,
             candidate_page_presentation,
             set_selection,
             selection_properties,

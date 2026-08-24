@@ -22,6 +22,23 @@ const elements = {
   pageCount: document.querySelector('#page-count'),
   historyState: document.querySelector('#history-state'),
   rendererStats: document.querySelector('#renderer-stats'),
+  pageSelect: document.querySelector('#page-select'),
+  addPage: document.querySelector('#add-page'),
+  deletePage: document.querySelector('#delete-page'),
+  pagePropertiesForm: document.querySelector('#page-properties-form'),
+  pageName: document.querySelector('#page-name'),
+  pageWidth: document.querySelector('#page-width'),
+  pageHeight: document.querySelector('#page-height'),
+  applyPageProperties: document.querySelector('#apply-page-properties'),
+  layerSelect: document.querySelector('#layer-select'),
+  addLayer: document.querySelector('#add-layer'),
+  deleteLayer: document.querySelector('#delete-layer'),
+  layerPropertiesForm: document.querySelector('#layer-properties-form'),
+  layerName: document.querySelector('#layer-name'),
+  layerVisible: document.querySelector('#layer-visible'),
+  layerLocked: document.querySelector('#layer-locked'),
+  layerElementCount: document.querySelector('#layer-element-count'),
+  applyLayerProperties: document.querySelector('#apply-layer-properties'),
   selectionSummary: document.querySelector('#selection-summary'),
   selectionPropertiesForm: document.querySelector('#selection-properties-form'),
   selectionName: document.querySelector('#selection-name'),
@@ -54,6 +71,12 @@ const actionButtons = [
   elements.addText,
   elements.deleteSelection,
   elements.applyProperties,
+  elements.addPage,
+  elements.deletePage,
+  elements.applyPageProperties,
+  elements.addLayer,
+  elements.deleteLayer,
+  elements.applyLayerProperties,
   elements.rendererBenchmark,
 ];
 
@@ -68,6 +91,8 @@ let recoveryTimer = null;
 let presentationRequestSequence = 0;
 let currentPresentation = null;
 let currentSelectionProperties = null;
+let currentNavigation = null;
+let isBusy = false;
 let keyboardSurface = null;
 
 const svgSurface = createSvgSurface(elements.canvasPage, {
@@ -88,15 +113,20 @@ keyboardSurface = createSvgKeyboardSurface(elements.canvasPage, {
 keyboardSurface.clear();
 svgSurface.setInteractionSettings(interactionSettings);
 renderInteractionButtons();
+renderNavigation(null);
 
 function setBusy(busy) {
+  isBusy = busy;
   for (const button of actionButtons) {
     button.disabled = busy;
   }
+  elements.pageSelect.disabled = busy;
+  elements.layerSelect.disabled = busy;
   if (!busy) {
     const selectionCount = Number(currentSelectionProperties?.count ?? 0);
     elements.deleteSelection.disabled = selectionCount === 0;
     elements.applyProperties.disabled = !currentSelectionProperties?.primary;
+    updateStructureDisabledState();
   }
 }
 
@@ -134,6 +164,86 @@ function renderState(state) {
   elements.pageCount.textContent = String(state.pageCount);
   elements.historyState.textContent = String(state.historyState);
   document.title = `${state.dirty ? '● ' : ''}${state.name} — DiagramDesigner Next`;
+}
+
+function updateStructureDisabledState() {
+  const pages = currentNavigation?.pages ?? [];
+  const activePage = pages.find((page) => page.pageId === currentNavigation?.activePageId) ?? null;
+  const activeLayer =
+    activePage?.layers.find((layer) => layer.layerId === currentNavigation?.activeLayerId) ?? null;
+  elements.deletePage.disabled = isBusy || pages.length <= 1 || !activePage;
+  elements.addLayer.disabled = isBusy || !activePage;
+  elements.deleteLayer.disabled =
+    isBusy || !activePage || activePage.layers.length <= 1 || !activeLayer || activeLayer.locked;
+  elements.deleteLayer.title = activeLayer?.locked
+    ? 'Unlock the layer before deleting it'
+    : 'Delete the active layer';
+  elements.applyPageProperties.disabled = isBusy || !activePage;
+  elements.applyLayerProperties.disabled = isBusy || !activeLayer;
+}
+
+function renderNavigation(navigation) {
+  currentNavigation = navigation;
+  const pages = navigation?.pages ?? [];
+  const pageFragment = document.createDocumentFragment();
+  for (const page of pages) {
+    const option = document.createElement('option');
+    option.value = page.pageId;
+    option.textContent = page.name;
+    pageFragment.append(option);
+  }
+  elements.pageSelect.replaceChildren(pageFragment);
+  if (navigation?.activePageId) {
+    elements.pageSelect.value = navigation.activePageId;
+  }
+
+  const activePage = pages.find((page) => page.pageId === navigation?.activePageId) ?? null;
+  elements.pagePropertiesForm.hidden = !activePage;
+  if (activePage) {
+    elements.pageName.value = activePage.name;
+    elements.pageWidth.value = String(activePage.sizeMm.width);
+    elements.pageHeight.value = String(activePage.sizeMm.height);
+  }
+
+  const layerFragment = document.createDocumentFragment();
+  for (const layer of activePage?.layers ?? []) {
+    const option = document.createElement('option');
+    option.value = layer.layerId;
+    const flags = `${layer.visible ? '' : ' · hidden'}${layer.locked ? ' · locked' : ''}`;
+    option.textContent = `${layer.name}${flags}`;
+    layerFragment.append(option);
+  }
+  elements.layerSelect.replaceChildren(layerFragment);
+  if (navigation?.activeLayerId) {
+    elements.layerSelect.value = navigation.activeLayerId;
+  }
+
+  const activeLayer =
+    activePage?.layers.find((layer) => layer.layerId === navigation?.activeLayerId) ?? null;
+  elements.layerPropertiesForm.hidden = !activeLayer;
+  if (activeLayer) {
+    elements.layerName.value = activeLayer.name;
+    elements.layerVisible.checked = activeLayer.visible;
+    elements.layerLocked.checked = activeLayer.locked;
+    elements.layerElementCount.textContent = `${activeLayer.elementCount} stored element${activeLayer.elementCount === 1 ? '' : 's'}`;
+  } else {
+    elements.layerElementCount.textContent = '';
+  }
+  updateStructureDisabledState();
+}
+
+async function refreshNavigation() {
+  if (!invoke) {
+    return null;
+  }
+  try {
+    const navigation = await invoke('document_navigation');
+    renderNavigation(navigation);
+    return navigation;
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+    return null;
+  }
 }
 
 function renderPresentationStats(presentation) {
@@ -220,7 +330,7 @@ async function refreshPresentation({ preserveSelection = true } = {}) {
     keyboardSurface?.refresh({ restoreFocus: restoreKeyboardFocus });
     renderPresentationStats(presentation);
     renderRulers(presentation);
-    await refreshSelectionProperties();
+    await Promise.all([refreshSelectionProperties(), refreshNavigation()]);
     return presentation;
   } catch (error) {
     if (requestSequence === presentationRequestSequence) {
@@ -299,6 +409,42 @@ async function syncSelection(elementIds) {
   }
 }
 
+function clearLocalSelection() {
+  svgSurface.setSelection([]);
+  keyboardSurface?.syncSelectionState([]);
+}
+
+async function runStructureAction(
+  command,
+  args,
+  message,
+  { persistent = true, preserveSelection = false } = {},
+) {
+  if (!invoke) {
+    return;
+  }
+  setBusy(true);
+  try {
+    const result = await invoke(command, args);
+    if (result?.state) {
+      renderState(result.state);
+    }
+    renderNavigation(result);
+    if (!preserveSelection) {
+      clearLocalSelection();
+    }
+    await refreshPresentation({ preserveSelection });
+    if (persistent) {
+      scheduleRecoverySync(250);
+    }
+    setStatus(message);
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function createBasicElement(kind) {
   if (!invoke) {
     return;
@@ -328,8 +474,7 @@ async function deleteCurrentSelection() {
   try {
     const result = await invoke('delete_selection');
     renderState(result.state);
-    svgSurface.setSelection([]);
-    keyboardSurface?.syncSelectionState([]);
+    clearLocalSelection();
     await refreshPresentation({ preserveSelection: false });
     await refreshSelectionProperties();
     scheduleRecoverySync(250);
@@ -566,6 +711,103 @@ elements.openDocument.addEventListener('click', () => {
     refreshPresentation: true,
       preserveSelection: false,
     },
+  );
+});
+
+elements.pageSelect.addEventListener('change', () => {
+  const pageId = elements.pageSelect.value;
+  if (pageId) {
+    void runStructureAction(
+      'activate_page',
+      { request: { pageId } },
+      'Active page changed',
+      { persistent: false },
+    );
+  }
+});
+
+elements.layerSelect.addEventListener('change', () => {
+  const pageId = currentNavigation?.activePageId;
+  const layerId = elements.layerSelect.value;
+  if (pageId && layerId) {
+    void runStructureAction(
+      'activate_layer',
+      { request: { pageId, layerId } },
+      'Active layer changed',
+      { persistent: false },
+    );
+  }
+});
+
+elements.addPage.addEventListener('click', () => {
+  void runStructureAction('create_page', undefined, 'Page created');
+});
+
+elements.deletePage.addEventListener('click', () => {
+  const pageId = currentNavigation?.activePageId;
+  if (pageId) {
+    void runStructureAction('delete_page', { request: { pageId } }, 'Page deleted');
+  }
+});
+
+elements.pagePropertiesForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const pageId = currentNavigation?.activePageId;
+  const width = Number(elements.pageWidth.value);
+  const height = Number(elements.pageHeight.value);
+  if (!pageId || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    setStatus('Page width and height must be finite positive values');
+    return;
+  }
+  void runStructureAction(
+    'update_page_properties',
+    {
+      request: {
+        pageId,
+        name: elements.pageName.value,
+        sizeMm: { width, height },
+      },
+    },
+    'Page properties updated',
+    { preserveSelection: true },
+  );
+});
+
+elements.addLayer.addEventListener('click', () => {
+  const pageId = currentNavigation?.activePageId;
+  if (pageId) {
+    void runStructureAction('create_layer', { request: { pageId } }, 'Layer created');
+  }
+});
+
+elements.deleteLayer.addEventListener('click', () => {
+  const pageId = currentNavigation?.activePageId;
+  const layerId = currentNavigation?.activeLayerId;
+  if (pageId && layerId) {
+    void runStructureAction('delete_layer', { request: { pageId, layerId } }, 'Layer deleted');
+  }
+});
+
+elements.layerPropertiesForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const pageId = currentNavigation?.activePageId;
+  const layerId = currentNavigation?.activeLayerId;
+  if (!pageId || !layerId) {
+    return;
+  }
+  void runStructureAction(
+    'update_layer_properties',
+    {
+      request: {
+        pageId,
+        layerId,
+        name: elements.layerName.value,
+        visible: elements.layerVisible.checked,
+        locked: elements.layerLocked.checked,
+      },
+    },
+    'Layer properties updated',
+    { preserveSelection: elements.layerVisible.checked },
   );
 });
 
