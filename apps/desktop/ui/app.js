@@ -86,11 +86,21 @@ function setStatus(message) {
 
 function renderState(state) {
   elements.documentName.textContent = state.name;
-  elements.documentPath.textContent = state.path ?? 'Not saved yet';
-  elements.documentPath.title = state.path ?? '';
+  let pathLabel = 'Not saved yet';
+  if (state.path && state.sourcePath) {
+    pathLabel = `${state.path} · imported from ${state.sourcePath}`;
+  } else if (state.path) {
+    pathLabel = state.path;
+  } else if (state.sourcePath) {
+    pathLabel = `Imported from ${state.sourcePath} · save as .ddnx`;
+  }
+  elements.documentPath.textContent = pathLabel;
+  elements.documentPath.title = pathLabel;
 
   if (state.recovered) {
     elements.documentDirty.textContent = 'Recovered — save required';
+  } else if (state.imported && !state.path) {
+    elements.documentDirty.textContent = 'Imported copy — save as DDNX';
   } else {
     elements.documentDirty.textContent = state.dirty ? 'Unsaved changes' : 'Saved';
   }
@@ -371,11 +381,19 @@ elements.newDocument.addEventListener('click', () => {
 });
 
 elements.openDocument.addEventListener('click', () => {
-  void runAction('open_document', undefined, () => 'Document opened', {
+  void runAction(
+    'open_document',
+    undefined,
+    (result) =>
+      result.state?.imported
+        ? 'Legacy file imported as an unsaved Next copy'
+        : 'Document opened',
+    {
     syncRecovery: true,
     refreshPresentation: true,
-    preserveSelection: false,
-  });
+      preserveSelection: false,
+    },
+  );
 });
 
 elements.saveDocument.addEventListener('click', () => {
