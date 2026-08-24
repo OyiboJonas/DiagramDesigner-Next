@@ -43,7 +43,7 @@ The marker tip is the connector endpoint. Geometry extends back into the connect
 - `Arrow2`, `Arrow3` and `DoubleArrow` receive the legacy outline-style outward offset relative to the endpoint;
 - system-palette colours retain the existing SVG fallback and typed diagnostic behaviour.
 
-The existing `ConnectorLineStyleApproximated` diagnostic for the **outline line itself** remains until the full two-colour outline line is implemented. Supporting marker interiors does not silently promote the line-style approximation.
+The straight-connector `Outline` line itself is now covered by the separate `connector-outline-contract.md`. For outline connectors, endpoint marker attributes are attached to an invisible carrier emitted after the outer and inner line passes so marker z-order matches the public upstream caller. This does not change the marker geometry or paint rules documented here.
 
 ## Diagnostic policy
 

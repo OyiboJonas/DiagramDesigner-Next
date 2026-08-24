@@ -11,19 +11,22 @@ pub use core::{SvgDiagnostic, SvgRenderError, SvgRenderOptions, SvgRenderOutput}
 
 use std::fmt::Write as _;
 
-use next_domain::{Color, Document, ElementId, ElementKind, ElementStyle, LineStyle, MarkerStyle};
+use next_domain::{
+    Color, Document, Element, ElementId, ElementKind, ElementStyle, LineStyle, MarkerStyle, Rect,
+};
 use render_plan::RenderPlan;
 
 const DEFAULT_STROKE_MM: f64 = 0.25;
 const PT_TO_MM: f64 = 25.4 / 72.0;
 const SYSTEM_PALETTE_FALLBACK: &str = "#808080";
 
-/// Render a page through the Phase-1 SVG core and apply Phase-2 standard
-/// connector-marker semantics.
+/// Render a page through the Phase-1 SVG core and apply Phase-2 connector
+/// compatibility semantics.
 ///
 /// Standard marker geometry is normalized from the pinned public Diagram
-/// Designer `TBaseConnectorObject.DrawLineEnd` contract. Unknown/custom marker
-/// codes remain explicit `ConnectorMarkerDeferred` diagnostics.
+/// Designer `TBaseConnectorObject.DrawLineEnd` contract. `LineStyle::Outline`
+/// follows the public upstream `DrawLineStyle` two-pass paint contract. Unknown
+/// custom marker/line-style codes remain explicit typed diagnostics.
 pub fn render_plan_to_svg(
     document: &Document,
     page_id: next_domain::PageId,
@@ -31,8 +34,108 @@ pub fn render_plan_to_svg(
     options: SvgRenderOptions,
 ) -> Result<SvgRenderOutput, SvgRenderError> {
     let mut output = core::render_plan_to_svg(document, page_id, plan, options)?;
+    apply_outline_straight_connectors(document, plan, &mut output);
     apply_standard_connector_markers(document, plan, &mut output);
     Ok(output)
+}
+
+fn apply_outline_straight_connectors(
+    document: &Document,
+    plan: &RenderPlan<'_>,
+    output: &mut SvgRenderOutput,
+) {
+    let mut supported = Vec::new();
+
+    for item in &plan.items {
+        let ElementKind::StraightConnector { connector } = &item.element.kind else {
+            continue;
+        };
+        if connector.line_style != LineStyle::Outline {
+            continue;
+        }
+
+        let style = item
+            .element
+            .style_id
+            .and_then(|style_id| document.styles.iter().find(|style| style.id == style_id));
+        let stroke = connector_stroke(style);
+
+        // An explicit style without a stroke intentionally hides the connector.
+        // The outline semantic is still fully understood, so no approximation
+        // diagnostic is needed and no secondary pass is materialized.
+        let Some(stroke) = stroke.as_ref() else {
+            supported.push(item.element.id);
+            continue;
+        };
+
+        let secondary = resolve_secondary_paint(
+            connector.secondary_color.as_ref(),
+            item.element.id,
+            &mut output.diagnostics,
+        );
+        let layers = render_outline_inner_and_marker_carrier(
+            item.element,
+            connector,
+            stroke.width_mm,
+            &secondary,
+        );
+        if inject_after_rendered_line(&mut output.svg, item.element.id, &layers) {
+            supported.push(item.element.id);
+        }
+    }
+
+    output.diagnostics.retain(|diagnostic| {
+        !matches!(
+            diagnostic,
+            SvgDiagnostic::ConnectorLineStyleApproximated {
+                element_id,
+                line_style: LineStyle::Outline,
+            } if supported.contains(element_id)
+        )
+    });
+}
+
+fn render_outline_inner_and_marker_carrier(
+    element: &Element,
+    connector: &next_domain::Connector,
+    outer_width_mm: f64,
+    secondary: &Paint,
+) -> String {
+    let rotation = rotation_attribute(element);
+    let inner_width_mm = outer_width_mm / 2.0;
+    let secondary_stroke = paint_attributes("stroke", secondary);
+    let mut result = String::new();
+
+    write!(
+        result,
+        "<line data-ddn-outline-inner=\"{}\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" fill=\"none\" stroke-linecap=\"round\" {} stroke-width=\"{}\" pointer-events=\"none\"{}/>",
+        element.id.0,
+        num(connector.start.position_mm.x),
+        num(connector.start.position_mm.y),
+        num(connector.end.position_mm.x),
+        num(connector.end.position_mm.y),
+        secondary_stroke,
+        num(inner_width_mm),
+        rotation,
+    )
+    .expect("writing SVG outline inner line into String cannot fail");
+
+    // The upstream renderer paints endpoint markers after both outline passes.
+    // This invisible carrier preserves exactly that z-order while the original
+    // outer line remains the interactive hit target.
+    write!(
+        result,
+        "<line data-ddn-marker-target=\"{}\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" fill=\"none\" stroke=\"none\" pointer-events=\"none\"{}/>",
+        element.id.0,
+        num(connector.start.position_mm.x),
+        num(connector.start.position_mm.y),
+        num(connector.end.position_mm.x),
+        num(connector.end.position_mm.y),
+        rotation,
+    )
+    .expect("writing SVG marker carrier into String cannot fail");
+
+    result
 }
 
 fn apply_standard_connector_markers(
@@ -86,7 +189,7 @@ fn apply_standard_connector_markers(
         }
 
         if !line_attributes.is_empty() {
-            inject_line_attributes(&mut output.svg, item.element.id, &line_attributes);
+            inject_marker_attributes(&mut output.svg, item.element.id, &line_attributes);
         }
     }
 
@@ -402,10 +505,29 @@ fn marker_vector_mm(marker: MarkerStyle) -> Option<f64> {
     Some(legacy_size_group * PT_TO_MM)
 }
 
-fn inject_line_attributes(svg: &mut String, element_id: ElementId, attributes: &str) {
+fn inject_after_rendered_line(svg: &mut String, element_id: ElementId, suffix: &str) -> bool {
     let needle = format!("<line data-element-id=\"{}\"", element_id.0);
-    if let Some(start) = svg.find(&needle) {
-        svg.insert_str(start + needle.len(), attributes);
+    let Some(start) = svg.find(&needle) else {
+        return false;
+    };
+    let Some(relative_end) = svg[start..].find("/>") else {
+        return false;
+    };
+    let insert_at = start + relative_end + 2;
+    svg.insert_str(insert_at, suffix);
+    true
+}
+
+fn inject_marker_attributes(svg: &mut String, element_id: ElementId, attributes: &str) {
+    let carrier = format!("<line data-ddn-marker-target=\"{}\"", element_id.0);
+    if let Some(start) = svg.find(&carrier) {
+        svg.insert_str(start + carrier.len(), attributes);
+        return;
+    }
+
+    let rendered = format!("<line data-element-id=\"{}\"", element_id.0);
+    if let Some(start) = svg.find(&rendered) {
+        svg.insert_str(start + rendered.len(), attributes);
     }
 }
 
@@ -416,6 +538,38 @@ fn inject_defs(svg: &mut String, marker_defs: &str) {
     }
     if let Some(root_end) = svg.find('>') {
         svg.insert_str(root_end + 1, &format!("<defs>{marker_defs}</defs>"));
+    }
+}
+
+fn rotation_attribute(element: &Element) -> String {
+    if element.rotation_deg == 0.0 {
+        return String::new();
+    }
+    let bounds = normalize_rect(element.bounds_mm);
+    format!(
+        " transform=\"rotate({} {} {})\"",
+        num(element.rotation_deg),
+        num(bounds.x + bounds.width / 2.0),
+        num(bounds.y + bounds.height / 2.0),
+    )
+}
+
+fn normalize_rect(rect: Rect) -> Rect {
+    let (x, width) = if rect.width >= 0.0 {
+        (rect.x, rect.width)
+    } else {
+        (rect.x + rect.width, -rect.width)
+    };
+    let (y, height) = if rect.height >= 0.0 {
+        (rect.y, rect.height)
+    } else {
+        (rect.y + rect.height, -rect.height)
+    };
+    Rect {
+        x,
+        y,
+        width,
+        height,
     }
 }
 

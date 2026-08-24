@@ -259,10 +259,12 @@ fn uml_and_outline_marker_interiors_use_secondary_color() {
 
     assert!(output.svg.matches("fill=\"#f07814\"").count() >= 2);
     assert!(output.svg.matches("fill-opacity=\"0.502\"").count() >= 2);
-    // Outline line rendering itself is still an explicitly typed approximation;
-    // this test only promotes the legacy marker-interior colour contract.
-    assert!(output.diagnostics.iter().any(|diagnostic| matches!(
+    assert!(output.svg.contains("data-ddn-outline-inner="));
+    assert!(!output.diagnostics.iter().any(|diagnostic| matches!(
         diagnostic,
-        SvgDiagnostic::ConnectorLineStyleApproximated { .. }
+        SvgDiagnostic::ConnectorLineStyleApproximated {
+            line_style: LineStyle::Outline,
+            ..
+        }
     )));
 }
