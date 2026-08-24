@@ -9,7 +9,7 @@ mod existing;
 
 pub use existing::{MigrationError, MigrationOptions};
 
-use legacy_ddd::{LegacyDecoded, LegacyFormat, encoding::LegacyEncoding};
+use legacy_ddd::{LegacyDecoded, LegacyFormat};
 use next_domain::{Artifact, ElementKind, NextArtifact, Scene};
 
 pub fn migrate_bytes(
@@ -76,6 +76,3 @@ fn normalize_scene(scene: &mut Scene) {
         element.rotation_deg = (legacy_radians as f64).to_degrees();
     }
 }
-
-#[allow(dead_code)]
-fn _encoding_type_is_part_of_public_signature(_: LegacyEncoding) {}
