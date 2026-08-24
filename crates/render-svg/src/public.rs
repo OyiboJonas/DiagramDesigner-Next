@@ -6,6 +6,7 @@
 
 #[path = "lib.rs"]
 mod core;
+mod orthogonal;
 
 pub use core::{SvgDiagnostic, SvgRenderError, SvgRenderOptions, SvgRenderOutput};
 
@@ -25,8 +26,9 @@ const SYSTEM_PALETTE_FALLBACK: &str = "#808080";
 ///
 /// Standard marker geometry is normalized from the pinned public Diagram
 /// Designer `TBaseConnectorObject.DrawLineEnd` contract. `LineStyle::Outline`
-/// follows the public upstream `DrawLineStyle` two-pass paint contract. Unknown
-/// custom marker/line-style codes remain explicit typed diagnostics.
+/// follows the public upstream `DrawLineStyle` two-pass paint contract. Orthogonal
+/// connector routes are derived from the public `TAxisLineObject` contract.
+/// Unknown custom marker/line-style codes remain explicit typed diagnostics.
 pub fn render_plan_to_svg(
     document: &Document,
     page_id: next_domain::PageId,
@@ -34,6 +36,7 @@ pub fn render_plan_to_svg(
     options: SvgRenderOptions,
 ) -> Result<SvgRenderOutput, SvgRenderError> {
     let mut output = core::render_plan_to_svg(document, page_id, plan, options)?;
+    orthogonal::apply_orthogonal_connectors(document, plan, &mut output);
     apply_outline_straight_connectors(document, plan, &mut output);
     apply_standard_connector_markers(document, plan, &mut output);
     Ok(output)
@@ -146,8 +149,10 @@ fn apply_standard_connector_markers(
     let mut defs = String::new();
 
     for item in &plan.items {
-        let ElementKind::StraightConnector { connector } = &item.element.kind else {
-            continue;
+        let connector = match &item.element.kind {
+            ElementKind::StraightConnector { connector }
+            | ElementKind::OrthogonalConnector { connector, .. } => connector,
+            _ => continue,
         };
 
         let style = item
@@ -160,7 +165,7 @@ fn apply_standard_connector_markers(
             item.element.id,
             &mut output.diagnostics,
         );
-        let mut line_attributes = String::new();
+        let mut marker_attributes = String::new();
 
         for (slot, marker) in [
             ("start", connector.start_marker),
@@ -184,12 +189,12 @@ fn apply_standard_connector_markers(
                 stroke,
                 &secondary,
             ));
-            write!(line_attributes, " marker-{slot}=\"url(#{marker_id})\"")
+            write!(marker_attributes, " marker-{slot}=\"url(#{marker_id})\"")
                 .expect("writing SVG marker attributes into String cannot fail");
         }
 
-        if !line_attributes.is_empty() {
-            inject_marker_attributes(&mut output.svg, item.element.id, &line_attributes);
+        if !marker_attributes.is_empty() {
+            inject_marker_attributes(&mut output.svg, item.element.id, &marker_attributes);
         }
     }
 
@@ -519,10 +524,12 @@ fn inject_after_rendered_line(svg: &mut String, element_id: ElementId, suffix: &
 }
 
 fn inject_marker_attributes(svg: &mut String, element_id: ElementId, attributes: &str) {
-    let carrier = format!("<line data-ddn-marker-target=\"{}\"", element_id.0);
-    if let Some(start) = svg.find(&carrier) {
-        svg.insert_str(start + carrier.len(), attributes);
-        return;
+    for tag in ["path", "line"] {
+        let carrier = format!("<{tag} data-ddn-marker-target=\"{}\"", element_id.0);
+        if let Some(start) = svg.find(&carrier) {
+            svg.insert_str(start + carrier.len(), attributes);
+            return;
+        }
     }
 
     let rendered = format!("<line data-element-id=\"{}\"", element_id.0);
