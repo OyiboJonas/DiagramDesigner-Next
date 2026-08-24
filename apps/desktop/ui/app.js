@@ -131,8 +131,10 @@ function setBusy(busy) {
   elements.layerSelect.disabled = busy;
   if (!busy) {
     const selectionCount = Number(currentSelectionProperties?.count ?? 0);
+    const primary = currentSelectionProperties?.primary ?? null;
     elements.deleteSelection.disabled = selectionCount === 0;
-    elements.applyProperties.disabled = !currentSelectionProperties?.primary;
+    elements.applyProperties.disabled =
+      !primary || (primary.geometryEditable === false && primary.textEditable !== true);
     updateStructureDisabledState();
   }
 }
@@ -631,8 +633,6 @@ async function commitSvgConnector(commit) {
   if (commit?.kind !== 'create-connector') {
     throw new TypeError('SVG surface emitted an unsupported connector command');
   }
-  const activeTool = connectorTool;
-  svgSurface.setConnectorTool(null);
   setBusy(true);
   try {
     const result = await invoke('create_connector', {
@@ -652,9 +652,6 @@ async function commitSvgConnector(commit) {
     return result.state;
   } finally {
     setBusy(false);
-    if (connectorTool === activeTool && activeTool !== null) {
-      svgSurface.setConnectorTool(activeTool);
-    }
   }
 }
 

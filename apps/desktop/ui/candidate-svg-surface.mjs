@@ -63,6 +63,7 @@ export function createCandidateSvgSurface(
   let disposePointerBinding = null;
   let connectorController = null;
   let connectorTool = null;
+  let connectorCommitPending = false;
   let selectedElementIds = [];
   let presentationGeometry = null;
   let interactionSettings = { ...DEFAULT_INTERACTION_SETTINGS };
@@ -223,14 +224,20 @@ export function createCandidateSvgSurface(
 
     const disposeConnector = bindConnectorPointerSurface(svg, {
       controller: connectorController,
-      getConnectorKind: () => connectorTool,
+      getConnectorKind: () => (connectorCommitPending ? null : connectorTool),
       onOverlay: (preview) => renderConnectorPreview(svg, preview),
       onCommit: (commit) => {
         renderConnectorPreview(svg, { ...commit, kind: "connector-preview" });
-        Promise.resolve(commitConnector(commit)).catch((error) => {
-          removeConnectorPreview(svg);
-          onError(error);
-        });
+        connectorCommitPending = true;
+        Promise.resolve()
+          .then(() => commitConnector(commit))
+          .catch((error) => {
+            removeConnectorPreview(svg);
+            onError(error);
+          })
+          .finally(() => {
+            connectorCommitPending = false;
+          });
       },
       onError,
     });
