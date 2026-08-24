@@ -123,5 +123,9 @@ fn cold_and_prepared_plans_keep_visible_slant_excursion_and_render_identically()
     assert_eq!(cold_svg, prepared_svg);
     assert_eq!(cold_svg.rendered_elements, 1);
     assert_eq!(cold_svg.skipped_elements, 0);
-    assert!(cold_svg.svg.contains("data-ddn-flowchart-kind=\"slant-right\""));
+    assert!(
+        cold_svg
+            .svg
+            .contains("data-ddn-flowchart-kind=\"slant-right\"")
+    );
 }
