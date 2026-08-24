@@ -1,6 +1,8 @@
 name: Windows desktop preview
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -10,7 +12,7 @@ permissions:
 
 jobs:
   build-preview:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'desktop-windows-preview-build'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.head_ref == 'desktop-windows-preview-build' || github.head_ref == 'desktop-preview-main-trigger'
     runs-on: windows-latest
     steps:
       - name: Checkout PR head
@@ -18,8 +20,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - name: Checkout dispatched ref
-        if: github.event_name == 'workflow_dispatch'
+      - name: Checkout source ref
+        if: github.event_name != 'pull_request'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
