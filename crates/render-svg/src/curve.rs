@@ -1,8 +1,8 @@
 use std::fmt::Write as _;
 
 use next_domain::{
-    Color, Connector, CurveKind, Document, Element, ElementId, ElementKind, ElementStyle, LineStyle,
-    MarkerStyle, Point, Rect,
+    Color, Connector, CurveKind, Document, Element, ElementId, ElementKind, ElementStyle,
+    LineStyle, MarkerStyle, Point, Rect,
 };
 use render_plan::RenderPlan;
 
