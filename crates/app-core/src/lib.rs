@@ -3,17 +3,32 @@ use ddnx::{
     compare_persistence, prepare_package, read_package, write_package_to_vec,
 };
 use editor_core::{
-    EditCommand, EditTransaction, EditorError, EditorSession, HistoryStateId, LayerScope,
-    LayerTarget,
+    ConnectorEndpointSide as CoreConnectorEndpointSide, EditCommand, EditTransaction, EditorError,
+    EditorSession, HistoryStateId, LayerScope, LayerTarget,
 };
 use editor_runtime::{EditorRuntime, RecoveryCheckpointKey, RecoveryPlan};
 use next_domain::{
-    Color, Element, ElementId, Layer, LayerId, NextArtifact, Page, PageId, Point, Rect, Size,
-    TextBlock,
+    Color, Connection, Element, ElementId, Layer, LayerId, NextArtifact, Page, PageId, Point, Rect,
+    Size, TextBlock,
 };
 use thiserror::Error;
 
 const INITIAL_DOCUMENT_GENERATION: u64 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectorEndpointSide {
+    Start,
+    End,
+}
+
+impl From<ConnectorEndpointSide> for CoreConnectorEndpointSide {
+    fn from(value: ConnectorEndpointSide) -> Self {
+        match value {
+            ConnectorEndpointSide::Start => Self::Start,
+            ConnectorEndpointSide::End => Self::End,
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum ApplicationError {
@@ -186,6 +201,23 @@ impl ApplicationSession {
             target,
             element,
             z_index,
+        })
+    }
+
+    /// Commit one connector endpoint as either a free point or a durable
+    /// target-port reference. Connected coordinates are resolved by editor-core.
+    pub fn set_connector_endpoint(
+        &mut self,
+        element_id: ElementId,
+        side: ConnectorEndpointSide,
+        position_mm: Point,
+        connection: Option<Connection>,
+    ) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::SetConnectorEndpoint {
+            element_id,
+            side: side.into(),
+            position_mm,
+            connection,
         })
     }
 
@@ -405,8 +437,9 @@ fn decode_ddnx(bytes: &[u8], limits: PackageLimits) -> Result<NextArtifact, Appl
 mod tests {
     use editor_runtime::RecoveryPlan;
     use next_domain::{
-        AnchorSet, ConnectorLabelStyle, Document, DocumentDefaults, DocumentId, Element,
-        ElementKind, Layer, LayerId, Page, PageId, Rect, Scene, Size,
+        AnchorSet, Connection, Connector, ConnectorLabelStyle, Document, DocumentDefaults,
+        DocumentId, Element, ElementKind, Endpoint, Layer, LayerId, LineStyle, MarkerStyle,
+        NormalizedPoint, Page, PageId, Port, PortId, Rect, Scene, Size,
     };
 
     use super::*;
@@ -479,7 +512,129 @@ mod tests {
     }
 
     #[test]
-    fn prepared_save_is_verified_but_does_not_mark_dirty_state_clean_before_ack() {
+    fn connector_endpoint_edit_uses_application_semantic_boundary() {
+        let source_id = ElementId::new();
+        let target_id = ElementId::new();
+        let port_id = PortId::new();
+        let page_id = PageId::new();
+        let layer_id = LayerId::new();
+        let source = Element {
+            id: source_id,
+            name: "Connector".to_owned(),
+            bounds_mm: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 10.0,
+                height: 10.0,
+            },
+            rotation_deg: 0.0,
+            anchors: AnchorSet::default(),
+            ports: Vec::new(),
+            style_id: None,
+            text: None,
+            kind: ElementKind::StraightConnector {
+                connector: Connector {
+                    start: Endpoint {
+                        position_mm: Point { x: 1.0, y: 1.0 },
+                        connection: None,
+                    },
+                    end: Endpoint {
+                        position_mm: Point { x: 9.0, y: 9.0 },
+                        connection: None,
+                    },
+                    start_marker: MarkerStyle::None,
+                    end_marker: MarkerStyle::None,
+                    line_style: LineStyle::Solid,
+                    secondary_color: None,
+                },
+            },
+            import: None,
+        };
+        let target = Element {
+            id: target_id,
+            name: "Target".to_owned(),
+            bounds_mm: Rect {
+                x: 20.0,
+                y: 30.0,
+                width: 10.0,
+                height: 10.0,
+            },
+            rotation_deg: 0.0,
+            anchors: AnchorSet::default(),
+            ports: vec![Port {
+                id: port_id,
+                index: 0,
+                position: NormalizedPoint { x: 1.0, y: 0.5 },
+            }],
+            style_id: None,
+            text: None,
+            kind: ElementKind::Rectangle {
+                corner_radius_mm: 0.0,
+            },
+            import: None,
+        };
+        let document = Document {
+            id: DocumentId::new(),
+            name: "Connector application test".to_owned(),
+            defaults: DocumentDefaults {
+                font_family: "Arial".to_owned(),
+                font_size_pt: 10.0,
+                font_style_bits: 0,
+                object_shadows: false,
+                auto_line_break: true,
+                connector_label_style: ConnectorLabelStyle::Transparent,
+            },
+            master_layers: Vec::new(),
+            pages: vec![Page {
+                id: page_id,
+                name: "Page".to_owned(),
+                size_mm: Size {
+                    width: 210.0,
+                    height: 297.0,
+                },
+                layers: vec![Layer {
+                    id: layer_id,
+                    name: "Layer".to_owned(),
+                    visible: true,
+                    locked: false,
+                    draw_color: None,
+                    scene: Scene {
+                        roots: vec![source_id, target_id],
+                        elements: vec![source, target],
+                    },
+                }],
+            }],
+            styles: Vec::new(),
+            assets: Vec::new(),
+            import: None,
+        };
+        let mut application =
+            ApplicationSession::from_artifact(NextArtifact::document(document)).unwrap();
+        application
+            .set_connector_endpoint(
+                source_id,
+                ConnectorEndpointSide::Start,
+                Point { x: -1.0, y: -1.0 },
+                Some(Connection {
+                    element_id: target_id,
+                    port_id,
+                }),
+            )
+            .unwrap();
+
+        let source = &application.session().document().pages[0].layers[0]
+            .scene
+            .elements[0];
+        let ElementKind::StraightConnector { connector } = &source.kind else {
+            panic!("expected straight connector")
+        };
+        assert_eq!(connector.start.connection.unwrap().element_id, target_id);
+        assert_eq!(connector.start.position_mm, Point { x: 30.0, y: 35.0 });
+        assert!(application.is_dirty());
+    }
+
+    #[test]
+    fn move_commit_marks_document_dirty_and_drives_recovery() {
         let (artifact, element_id) = fixture();
         let mut app = ApplicationSession::from_artifact(artifact).unwrap();
         app.commit_move_elements(vec![element_id], Point { x: 5.0, y: 0.0 })
