@@ -135,5 +135,9 @@ fn cold_and_prepared_viewport_plans_render_identical_metafile_renditions() {
     assert_eq!(cold_svg, prepared_svg);
     assert_eq!(cold_svg.rendered_elements, 1);
     assert_eq!(cold_svg.skipped_elements, 0);
-    assert!(cold_svg.svg.contains("data-ddn-metafile-rendition=\"image/png\""));
+    assert!(
+        cold_svg
+            .svg
+            .contains("data-ddn-metafile-rendition=\"image/png\"")
+    );
 }
