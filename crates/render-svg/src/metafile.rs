@@ -3,10 +3,7 @@ use std::collections::BTreeMap;
 use next_domain::{Asset, AssetId, AssetPayload, Document, Element, ElementKind, Rect};
 use render_plan::RenderPlan;
 
-use super::{
-    MetafileAssetIssue, MetafileRenditionIssue, SvgDiagnostic, SvgRenderOutput, num,
-    rotation_attribute,
-};
+use super::{SvgDiagnostic, SvgRenderOutput};
 
 const LEGACY_METAFILE_MEDIA_TYPE: &str =
     "application/vnd.diagramdesigner-next.windows-metafile";
@@ -37,11 +34,11 @@ pub(super) fn apply_metafiles(
     renditions: &MetafileRenditions,
     output: &mut SvgRenderOutput,
 ) {
-    let mut retired = Vec::new();
+    let mut asset_diagnostic_elements = Vec::new();
     let mut rendered = Vec::new();
 
-    // The Phase-1 core skips metafiles. Work backwards so inserting before the
-    // nearest later materialized element preserves render-plan z-order.
+    // The selected SVG renderer skips metafiles. Work backwards so inserting
+    // before the nearest later materialized element preserves render-plan z-order.
     for index in (0..plan.items.len()).rev() {
         let item = &plan.items[index];
         let ElementKind::Metafile { asset_id } = &item.element.kind else {
@@ -63,56 +60,39 @@ pub(super) fn apply_metafiles(
                     asset_id,
                 },
             );
-            retired.push(item.element.id);
+            asset_diagnostic_elements.push(item.element.id);
             continue;
         };
 
-        if let Err(issue) = validate_source_asset(asset) {
+        if !valid_source_asset(asset) {
             push_diagnostic_once(
                 output,
-                SvgDiagnostic::InvalidMetafileAsset {
+                SvgDiagnostic::UnsupportedAssetPayload {
                     element_id: item.element.id,
                     asset_id,
-                    issue,
                 },
             );
-            retired.push(item.element.id);
+            asset_diagnostic_elements.push(item.element.id);
             continue;
         }
 
-        let Some(rendition) = renditions.get(&asset_id) else {
-            push_diagnostic_once(
-                output,
-                SvgDiagnostic::MetafileRenditionUnavailable {
-                    element_id: item.element.id,
-                    asset_id,
-                },
-            );
-            retired.push(item.element.id);
+        let Some(rendition) = renditions
+            .get(&asset_id)
+            .filter(|rendition| valid_rendition(rendition))
+        else {
+            // Deliberately retain the core UnsupportedPrimitive(Metafile)
+            // diagnostic until a real browser-renderable rendition is available.
+            // Preserving binary bytes alone is not a WMF/EMF compatibility claim.
             continue;
         };
-
-        if let Err(issue) = validate_rendition(rendition) {
-            push_diagnostic_once(
-                output,
-                SvgDiagnostic::InvalidMetafileRendition {
-                    element_id: item.element.id,
-                    asset_id,
-                    issue,
-                },
-            );
-            retired.push(item.element.id);
-            continue;
-        }
 
         let fragment = render_metafile_rendition(item.element, asset_id, rendition);
         if inject_fragment_in_plan_order(&mut output.svg, plan, index, &fragment) {
-            retired.push(item.element.id);
             rendered.push(item.element.id);
         }
     }
 
-    if retired.is_empty() {
+    if asset_diagnostic_elements.is_empty() && rendered.is_empty() {
         return;
     }
 
@@ -120,37 +100,23 @@ pub(super) fn apply_metafiles(
         !matches!(
             diagnostic,
             SvgDiagnostic::UnsupportedPrimitive { element_id, .. }
-                if retired.contains(element_id)
+                if asset_diagnostic_elements.contains(element_id) || rendered.contains(element_id)
         )
     });
     output.rendered_elements += rendered.len();
     output.skipped_elements = output.skipped_elements.saturating_sub(rendered.len());
 }
 
-fn validate_source_asset(asset: &Asset) -> Result<(), MetafileAssetIssue> {
+fn valid_source_asset(asset: &Asset) -> bool {
     if asset.media_type != LEGACY_METAFILE_MEDIA_TYPE {
-        return Err(MetafileAssetIssue::UnexpectedMediaType {
-            actual: asset.media_type.clone(),
-        });
+        return false;
     }
-
-    match &asset.payload {
-        AssetPayload::Binary { bytes } if bytes.is_empty() => Err(MetafileAssetIssue::EmptyPayload),
-        AssetPayload::Binary { .. } => Ok(()),
-        AssetPayload::Raster { .. } => Err(MetafileAssetIssue::ExpectedBinaryPayload),
-    }
+    matches!(&asset.payload, AssetPayload::Binary { bytes } if !bytes.is_empty())
 }
 
-fn validate_rendition(rendition: &MetafileRendition) -> Result<(), MetafileRenditionIssue> {
-    if rendition.bytes.is_empty() {
-        return Err(MetafileRenditionIssue::EmptyPayload);
-    }
-    if !SUPPORTED_RENDITION_MEDIA_TYPES.contains(&rendition.media_type.as_str()) {
-        return Err(MetafileRenditionIssue::UnsupportedMediaType {
-            actual: rendition.media_type.clone(),
-        });
-    }
-    Ok(())
+fn valid_rendition(rendition: &MetafileRendition) -> bool {
+    !rendition.bytes.is_empty()
+        && SUPPORTED_RENDITION_MEDIA_TYPES.contains(&rendition.media_type.as_str())
 }
 
 fn render_metafile_rendition(
@@ -216,6 +182,19 @@ fn inject_fragment_in_plan_order(
     false
 }
 
+fn rotation_attribute(element: &Element) -> String {
+    if element.rotation_deg == 0.0 {
+        return String::new();
+    }
+    let bounds = normalize_rect(element.bounds_mm);
+    format!(
+        " transform=\"rotate({} {} {})\"",
+        num(element.rotation_deg),
+        num(bounds.x + bounds.width / 2.0),
+        num(bounds.y + bounds.height / 2.0),
+    )
+}
+
 fn normalize_rect(rect: Rect) -> Rect {
     let (x, width) = if rect.width >= 0.0 {
         (rect.x, rect.width)
@@ -233,6 +212,20 @@ fn normalize_rect(rect: Rect) -> Rect {
         width,
         height,
     }
+}
+
+fn num(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_owned();
+    }
+    let mut value = format!("{value:.4}");
+    while value.contains('.') && value.ends_with('0') {
+        value.pop();
+    }
+    if value.ends_with('.') {
+        value.pop();
+    }
+    value
 }
 
 fn base64_encode(bytes: &[u8]) -> String {
