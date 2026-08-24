@@ -26,7 +26,7 @@ jobs:
       - name: Format Rust
         run: cargo fmt --all
       - name: Verify application core
-        run: cargo test --locked -p app-core
+        run: cargo test --manifest-path crates/app-core/Cargo.toml
       - name: Verify desktop JavaScript
         run: node --check apps/desktop/ui/app.js
       - name: Verify working tree patch
