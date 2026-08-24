@@ -3,10 +3,14 @@ use ddnx::{
     compare_persistence, prepare_package, read_package, write_package_to_vec,
 };
 use editor_core::{
-    EditCommand, EditTransaction, EditorError, EditorSession, HistoryStateId, LayerTarget,
+    EditCommand, EditTransaction, EditorError, EditorSession, HistoryStateId, LayerScope,
+    LayerTarget,
 };
 use editor_runtime::{EditorRuntime, RecoveryCheckpointKey, RecoveryPlan};
-use next_domain::{Element, ElementId, NextArtifact, Point, Rect, TextBlock};
+use next_domain::{
+    Color, Element, ElementId, Layer, LayerId, NextArtifact, Page, PageId, Point, Rect, Size,
+    TextBlock,
+};
 use thiserror::Error;
 
 const INITIAL_DOCUMENT_GENERATION: u64 = 1;
@@ -217,6 +221,93 @@ impl ApplicationSession {
             transaction.push(EditCommand::SetText { element_id, text });
         }
         self.execute_edit_transaction(transaction)
+    }
+
+    /// Switch the active page without creating a persistent history step.
+    pub fn set_active_page(&mut self, page_id: PageId) -> Result<(), ApplicationError> {
+        self.runtime.session_mut().set_active_page(page_id)?;
+        Ok(())
+    }
+
+    /// Return the active page-local layer ID while keeping `LayerTarget` private to app-core.
+    pub fn active_page_layer_id(&self) -> Option<LayerId> {
+        match self.runtime.session().active_layer()? {
+            LayerTarget::Page { layer_id, .. } => Some(layer_id),
+            LayerTarget::Master { .. } => None,
+        }
+    }
+
+    /// Switch the active page-local layer without creating a persistent history step.
+    pub fn set_active_page_layer(
+        &mut self,
+        page_id: PageId,
+        layer_id: LayerId,
+    ) -> Result<(), ApplicationError> {
+        self.runtime
+            .session_mut()
+            .set_active_layer(LayerTarget::Page { page_id, layer_id })?;
+        Ok(())
+    }
+
+    pub fn create_page(&mut self, page: Page) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::CreatePage { page, index: None })
+    }
+
+    pub fn delete_page(&mut self, page_id: PageId) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::DeletePage { page_id })
+    }
+
+    pub fn set_page_properties(
+        &mut self,
+        page_id: PageId,
+        name: String,
+        size_mm: Size,
+    ) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::SetPageProperties {
+            page_id,
+            name,
+            size_mm,
+        })
+    }
+
+    pub fn create_page_layer(
+        &mut self,
+        page_id: PageId,
+        layer: Layer,
+    ) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::CreateLayer {
+            scope: LayerScope::Page { page_id },
+            layer,
+            index: None,
+        })
+    }
+
+    pub fn delete_page_layer(
+        &mut self,
+        page_id: PageId,
+        layer_id: LayerId,
+    ) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::DeleteLayer {
+            target: LayerTarget::Page { page_id, layer_id },
+        })
+    }
+
+    pub fn set_page_layer_properties(
+        &mut self,
+        page_id: PageId,
+        layer_id: LayerId,
+        name: String,
+        visible: bool,
+        locked: bool,
+        draw_color: Option<Color>,
+    ) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::SetLayerProperties {
+            target: LayerTarget::Page { page_id, layer_id },
+            name,
+            visible,
+            locked,
+            draw_color,
+        })
     }
 
     pub fn set_selection<I>(&mut self, element_ids: I) -> Result<(), ApplicationError>
@@ -580,5 +671,136 @@ mod tests {
         assert!(app.undo().unwrap());
         assert_eq!(app.session().current_history_state(), initial);
         assert!(!app.is_dirty());
+    }
+
+    #[test]
+    fn page_and_layer_commands_keep_navigation_transient_and_structure_in_history() {
+        let (artifact, _) = fixture();
+        let mut app = ApplicationSession::from_artifact(artifact).unwrap();
+        let first_page = app.session().active_page_id().unwrap();
+        let first_layer = app.active_page_layer_id().unwrap();
+        let initial = app.session().current_history_state();
+
+        let second_page = PageId::new();
+        let second_layer = LayerId::new();
+        assert!(
+            app.create_page(Page {
+                id: second_page,
+                name: "Page 2".to_owned(),
+                size_mm: Size {
+                    width: 297.0,
+                    height: 210.0,
+                },
+                layers: vec![Layer {
+                    id: second_layer,
+                    name: "Layer 1".to_owned(),
+                    visible: true,
+                    locked: false,
+                    draw_color: None,
+                    scene: Scene::default(),
+                }],
+            })
+            .unwrap()
+        );
+        let after_page_create = app.session().current_history_state();
+        assert_ne!(after_page_create, initial);
+
+        app.set_active_page(second_page).unwrap();
+        app.set_active_page_layer(second_page, second_layer)
+            .unwrap();
+        assert_eq!(app.session().active_page_id(), Some(second_page));
+        assert_eq!(app.active_page_layer_id(), Some(second_layer));
+        assert_eq!(app.session().current_history_state(), after_page_create);
+
+        let extra_layer = LayerId::new();
+        assert!(
+            app.create_page_layer(
+                second_page,
+                Layer {
+                    id: extra_layer,
+                    name: "Layer 2".to_owned(),
+                    visible: true,
+                    locked: false,
+                    draw_color: None,
+                    scene: Scene::default(),
+                },
+            )
+            .unwrap()
+        );
+        app.set_active_page_layer(second_page, extra_layer).unwrap();
+        assert_eq!(app.active_page_layer_id(), Some(extra_layer));
+
+        assert!(
+            app.set_page_properties(
+                second_page,
+                "Landscape".to_owned(),
+                Size {
+                    width: 320.0,
+                    height: 180.0,
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            app.set_page_layer_properties(
+                second_page,
+                extra_layer,
+                "Annotations".to_owned(),
+                false,
+                true,
+                None,
+            )
+            .unwrap()
+        );
+        let page = app
+            .session()
+            .document()
+            .pages
+            .iter()
+            .find(|page| page.id == second_page)
+            .unwrap();
+        assert_eq!(page.name, "Landscape");
+        let layer = page
+            .layers
+            .iter()
+            .find(|layer| layer.id == extra_layer)
+            .unwrap();
+        assert_eq!(layer.name, "Annotations");
+        assert!(!layer.visible);
+        assert!(layer.locked);
+
+        assert!(
+            app.set_page_layer_properties(
+                second_page,
+                extra_layer,
+                "Annotations".to_owned(),
+                true,
+                false,
+                None,
+            )
+            .unwrap()
+        );
+        assert!(app.delete_page_layer(second_page, extra_layer).unwrap());
+        assert!(app.undo().unwrap());
+        assert!(
+            app.session()
+                .document()
+                .pages
+                .iter()
+                .find(|page| page.id == second_page)
+                .unwrap()
+                .layers
+                .iter()
+                .any(|layer| layer.id == extra_layer)
+        );
+
+        app.set_active_page(first_page).unwrap();
+        app.set_active_page_layer(first_page, first_layer).unwrap();
+        let before_page_delete = app.session().current_history_state();
+        assert!(app.delete_page(second_page).unwrap());
+        assert_eq!(app.session().document().pages.len(), 1);
+        assert!(app.undo().unwrap());
+        assert_eq!(app.session().document().pages.len(), 2);
+        assert_eq!(app.session().current_history_state(), before_page_delete);
     }
 }

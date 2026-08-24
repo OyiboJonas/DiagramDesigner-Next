@@ -618,3 +618,98 @@ button.toggle-button[aria-pressed="true"] {
   margin: 0;
   line-height: 1.35;
 }
+
+.document-structure {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.document-structure-heading,
+.selection-inspector-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.document-structure h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.document-structure select,
+.document-structure input,
+.selection-inspector input,
+.selection-inspector textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.document-structure select,
+.document-structure input,
+.selection-inspector input {
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+.document-structure select:focus-visible,
+.document-structure input:focus-visible,
+.selection-inspector input:focus-visible,
+.selection-inspector textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.structure-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 7px;
+}
+
+.structure-actions button,
+.structure-form button {
+  width: 100%;
+}
+
+.structure-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 9px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+}
+
+.structure-layer-field {
+  margin-top: 14px;
+}
+
+.structure-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.structure-checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.structure-checks input {
+  width: auto;
+  min-height: auto;
+  margin: 0;
+}
