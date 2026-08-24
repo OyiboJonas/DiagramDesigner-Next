@@ -1,3 +1,4 @@
+mod legacy_import;
 mod renderer_benchmark_evidence;
 
 use std::{
@@ -34,6 +35,12 @@ const RENDERER_BENCHMARK_WINDOW_LABEL: &str = "renderer-benchmark";
 struct DesktopDocument {
     session: ApplicationSession,
     path: Option<PathBuf>,
+    /// Original legacy source path retained only for provenance/display. It is
+    /// never a save destination.
+    source_path: Option<PathBuf>,
+    /// A migrated legacy source starts as an unsaved Next copy even though its
+    /// freshly-created editor history has no edits yet.
+    imported_dirty: bool,
     /// A restored recovery snapshot is intentionally detached from any user file.
     /// `ApplicationSession` correctly sees the decoded snapshot as its initial
     /// history state, so this desktop-owned flag keeps the recovered copy dirty
@@ -47,6 +54,8 @@ impl DesktopDocument {
             session: ApplicationSession::from_artifact(blank_document_artifact())
                 .map_err(|error| CommandError::new("new_document_failed", error.to_string()))?,
             path: None,
+            source_path: None,
+            imported_dirty: false,
             recovered_dirty: false,
         })
     }
@@ -95,6 +104,8 @@ impl CommandError {
 struct DocumentStateDto {
     name: String,
     path: Option<String>,
+    source_path: Option<String>,
+    imported: bool,
     dirty: bool,
     recovered: bool,
     page_count: usize,
@@ -412,7 +423,7 @@ async fn open_document(
     let selected = app
         .dialog()
         .file()
-        .add_filter("DiagramDesigner Next", &["ddnx"])
+        .add_filter("DiagramDesigner files", &["ddnx", "ddd", "ddt"])
         .blocking_pick_file();
     let Some(selected) = selected else {
         let document = lock_document(&state)?;
@@ -424,19 +435,43 @@ async fn open_document(
     let path = selected
         .into_path()
         .map_err(|error| CommandError::new("invalid_selected_path", error.to_string()))?;
+    let source_kind = legacy_import::classify_path(&path)
+        .map_err(|error| CommandError::new("unsupported_document_type", error))?;
 
     let bytes = fs::read(&path)
         .map_err(|error| CommandError::new("document_read_failed", error.to_string()))?;
-    let opened = ApplicationSession::from_ddnx_bytes(&bytes, PackageLimits::default())
-        .map_err(|error| CommandError::new("document_open_failed", error.to_string()))?;
+    let (opened, persistent_path, source_path, imported_dirty) = match source_kind {
+        legacy_import::DocumentSourceKind::NativeDdnx => {
+            let opened = ApplicationSession::from_ddnx_bytes(&bytes, PackageLimits::default())
+                .map_err(|error| CommandError::new("document_open_failed", error.to_string()))?;
+            (opened, Some(path.clone()), None, false)
+        }
+        legacy_import::DocumentSourceKind::LegacyDdd
+        | legacy_import::DocumentSourceKind::LegacyDdt => {
+            let artifact = legacy_import::migrate_legacy_bytes(
+                &bytes,
+                source_kind,
+                desktop_document_defaults(),
+            )
+            .map_err(|error| CommandError::new("legacy_import_failed", error))?;
+            let opened = ApplicationSession::from_artifact(artifact)
+                .map_err(|error| CommandError::new("legacy_import_failed", error.to_string()))?;
+            // The legacy source is deliberately detached from persistence. Save
+            // therefore enters the existing first-save .ddnx picker instead of
+            // ever replacing the .ddd/.ddt source file.
+            (opened, None, Some(path.clone()), true)
+        }
+    };
 
     let mut document = lock_document(&state)?;
-    // A second check makes the replacement safe even if another command edited the
-    // document while the native picker or package verification was running.
+    // A second check makes replacement safe even if another command edited the
+    // document while the native picker or migration was running.
     reject_if_dirty(&document)?;
     *document = DesktopDocument {
         session: opened,
-        path: Some(path),
+        path: persistent_path,
+        source_path,
+        imported_dirty,
         recovered_dirty: false,
     };
 
@@ -511,6 +546,7 @@ async fn save_document(
     if first_save {
         document.path = Some(destination);
     }
+    document.imported_dirty = false;
     document.recovered_dirty = false;
 
     Ok(SaveResultDto {
@@ -564,6 +600,8 @@ fn restore_recovery(
         // A recovery snapshot never inherits a user-visible save target. The user
         // must explicitly choose where to save the recovered copy.
         path: None,
+        source_path: None,
+        imported_dirty: false,
         recovered_dirty: true,
     };
 
@@ -592,7 +630,7 @@ fn sync_recovery(
     // This also handles Edit -> Undo back to the recovered initial history state,
     // which editor-core correctly considers clean relative to its decoded baseline
     // but which is still unsaved from the user's perspective.
-    if document.recovered_dirty {
+    if document.recovered_dirty || document.imported_dirty {
         let prepared = document
             .session
             .prepare_document_save(PackageLimits::default())
@@ -716,7 +754,7 @@ fn lock_document<'a>(
 }
 
 fn reject_if_dirty(document: &DesktopDocument) -> Result<(), CommandError> {
-    if document.recovered_dirty || document.session.is_dirty() {
+    if document.recovered_dirty || document.imported_dirty || document.session.is_dirty() {
         return Err(CommandError::new(
             "unsaved_changes",
             "The current document has unsaved changes. Save it before replacing the document session.",
@@ -733,7 +771,12 @@ fn document_state_dto(document: &DesktopDocument) -> DocumentStateDto {
             .path
             .as_deref()
             .map(|path| path.to_string_lossy().into_owned()),
-        dirty: document.recovered_dirty || document.session.is_dirty(),
+        source_path: document
+            .source_path
+            .as_deref()
+            .map(|path| path.to_string_lossy().into_owned()),
+        imported: document.source_path.is_some(),
+        dirty: document.recovered_dirty || document.imported_dirty || document.session.is_dirty(),
         recovered: document.recovered_dirty,
         page_count: session.document().pages.len(),
         active_page_id: session.active_page_id(),
@@ -825,20 +868,24 @@ fn map_recovery_save_error(error: AtomicSaveError) -> CommandError {
     }
 }
 
+fn desktop_document_defaults() -> DocumentDefaults {
+    DocumentDefaults {
+        font_family: "Arial".to_owned(),
+        font_size_pt: 10.0,
+        font_style_bits: 0,
+        object_shadows: false,
+        auto_line_break: true,
+        connector_label_style: ConnectorLabelStyle::Transparent,
+    }
+}
+
 fn blank_document_artifact() -> NextArtifact {
     let page_id = PageId::new();
     let layer_id = LayerId::new();
     NextArtifact::document(Document {
         id: DocumentId::new(),
         name: UNTITLED_DOCUMENT_NAME.to_owned(),
-        defaults: DocumentDefaults {
-            font_family: "Arial".to_owned(),
-            font_size_pt: 10.0,
-            font_style_bits: 0,
-            object_shadows: false,
-            auto_line_break: true,
-            connector_label_style: ConnectorLabelStyle::Transparent,
-        },
+        defaults: desktop_document_defaults(),
         master_layers: Vec::new(),
         pages: vec![Page {
             id: page_id,

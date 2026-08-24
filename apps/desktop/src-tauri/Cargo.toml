@@ -15,6 +15,7 @@ tauri-build = "=2.6.3"
 [dependencies]
 app-core = { path = "../../../crates/app-core" }
 ddnx = { path = "../../../crates/ddnx" }
+legacy-migrate = { path = "../../../crates/legacy-migrate" }
 editor-runtime = { path = "../../../crates/editor-runtime" }
 next-domain = { path = "../../../crates/next-domain" }
 platform-fs = { path = "../../../crates/platform-fs" }
