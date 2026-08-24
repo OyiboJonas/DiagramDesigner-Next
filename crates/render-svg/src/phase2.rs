@@ -4,9 +4,9 @@
 //! semantics are layered outside `next-domain` so renderer-specific state never
 //! leaks into editor history or semantic commands.
 
+mod curve;
 #[path = "public.rs"]
 mod existing;
-mod curve;
 mod flowchart;
 mod metafile;
 
