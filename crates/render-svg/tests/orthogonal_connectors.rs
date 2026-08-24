@@ -179,13 +179,17 @@ fn same_side_vertical_ports_keep_the_legacy_marker_clearance_hairpin() {
 
     assert_eq!(output.rendered_elements, 3);
     assert_eq!(output.skipped_elements, 0);
-    assert!(output.svg.contains("data-ddn-start-direction=\"vertical-top\""));
-    assert!(output.svg.contains("data-ddn-end-direction=\"vertical-top\""));
     assert!(
         output
             .svg
-            .contains("d=\"M 20 30 L 20 26.825 L 20 70\"")
+            .contains("data-ddn-start-direction=\"vertical-top\"")
     );
+    assert!(
+        output
+            .svg
+            .contains("data-ddn-end-direction=\"vertical-top\"")
+    );
+    assert!(output.svg.contains("d=\"M 20 30 L 20 26.825 L 20 70\""));
     assert!(output.svg.contains("marker-start=\"url(#ddn-marker-"));
     assert!(output.svg.contains("marker-end=\"url(#ddn-marker-"));
     assert!(!output.diagnostics.iter().any(|diagnostic| matches!(
@@ -311,11 +315,23 @@ fn rounded_outline_route_reuses_secondary_paint_and_standard_markers() {
     let (document, page_id) = document(vec![left, top, connector], vec![style]);
     let output = render(&document, page_id);
 
-    assert!(output.svg.contains("data-ddn-start-direction=\"horizontal-right\""));
-    assert!(output.svg.contains("data-ddn-end-direction=\"vertical-top\""));
+    assert!(
+        output
+            .svg
+            .contains("data-ddn-start-direction=\"horizontal-right\"")
+    );
+    assert!(
+        output
+            .svg
+            .contains("data-ddn-end-direction=\"vertical-top\"")
+    );
     assert!(output.svg.contains(" A 5 5 0 0 1 "));
     assert!(output.svg.contains("data-ddn-outline-inner="));
-    assert!(output.svg.contains("stroke=\"#c81e28\" stroke-opacity=\"0.502\" stroke-width=\"1\""));
+    assert!(
+        output
+            .svg
+            .contains("stroke=\"#c81e28\" stroke-opacity=\"0.502\" stroke-width=\"1\"")
+    );
 
     let outer = output.svg.find("data-ddn-connector-outer=").unwrap();
     let inner = output.svg.find("data-ddn-outline-inner=").unwrap();

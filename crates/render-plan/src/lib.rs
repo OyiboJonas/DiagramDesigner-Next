@@ -1,7 +1,7 @@
 mod cull_bounds;
 mod prepared;
-pub use prepared::{PreparedPage, PreparedPageOptions, PreparedPageStats};
 pub(crate) use cull_bounds::element_cull_bounds;
+pub use prepared::{PreparedPage, PreparedPageOptions, PreparedPageStats};
 
 use std::collections::{BTreeMap, BTreeSet};
 

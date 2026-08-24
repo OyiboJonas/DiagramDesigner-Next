@@ -112,9 +112,7 @@ fn rotated_aabb(rect: Rect, rotation_deg: f64) -> Rect {
 
 #[cfg(test)]
 mod tests {
-    use next_domain::{
-        AnchorSet, Connector, ElementId, Endpoint, LineStyle, Point,
-    };
+    use next_domain::{AnchorSet, Connector, ElementId, Endpoint, LineStyle, Point};
 
     use super::*;
 

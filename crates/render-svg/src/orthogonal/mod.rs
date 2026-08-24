@@ -161,12 +161,7 @@ fn resolve_end_directions(
     // runs FindEndDirection(1), followed by (2). Center ports consult the opposite
     // direction, so replaying this order matters for center/center ties.
     let provisional_end = EndDirection::VerticalTop;
-    let start = resolve_endpoint_direction(
-        document,
-        connector,
-        &connector.start,
-        provisional_end,
-    );
+    let start = resolve_endpoint_direction(document, connector, &connector.start, provisional_end);
     let end = resolve_endpoint_direction(document, connector, &connector.end, start);
     (start, end)
 }
