@@ -178,6 +178,15 @@ function updateStructureDisabledState() {
   elements.deleteLayer.title = activeLayer?.locked
     ? 'Unlock the layer before deleting it'
     : 'Delete the active layer';
+  const layerEditable = Boolean(activeLayer?.visible && !activeLayer?.locked);
+  elements.addRectangle.disabled = isBusy || !layerEditable;
+  elements.addText.disabled = isBusy || !layerEditable;
+  elements.addRectangle.title = layerEditable
+    ? 'Create a rectangle on the active layer'
+    : 'Choose a visible, unlocked layer to create elements';
+  elements.addText.title = layerEditable
+    ? 'Create a text box on the active layer'
+    : 'Choose a visible, unlocked layer to create elements';
   elements.applyPageProperties.disabled = isBusy || !activePage;
   elements.applyLayerProperties.disabled = isBusy || !activeLayer;
 }
@@ -807,7 +816,7 @@ elements.layerPropertiesForm.addEventListener('submit', (event) => {
       },
     },
     'Layer properties updated',
-    { preserveSelection: elements.layerVisible.checked },
+    { preserveSelection: elements.layerVisible.checked && !elements.layerLocked.checked },
   );
 });
 

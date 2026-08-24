@@ -516,7 +516,7 @@ fn update_layer_properties(
             draw_color,
         )
         .map_err(|error| CommandError::new("layer_properties_failed", error.to_string()))?;
-    if !request.visible {
+    if !request.visible || request.locked {
         document.session.clear_selection();
     }
     Ok(document_navigation_dto(&document))
