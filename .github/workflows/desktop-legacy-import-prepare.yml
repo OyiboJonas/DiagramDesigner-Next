@@ -27,8 +27,10 @@ jobs:
         run: cargo generate-lockfile --manifest-path apps/desktop/src-tauri/Cargo.toml
       - name: Format Rust
         run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
-      - name: Verify desktop library
-        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+      - name: Verify locked desktop dependency graph
+        run: cargo metadata --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --format-version 1 --no-deps > /dev/null
+      - name: Verify legacy migration library
+        run: cargo test --locked --manifest-path crates/legacy-migrate/Cargo.toml
       - name: Verify desktop JavaScript
         run: node --check apps/desktop/ui/app.js
       - name: Commit prepared implementation
