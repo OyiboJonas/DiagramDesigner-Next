@@ -1,0 +1,47 @@
+name: Branch image desktop lock helper
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lock:
+    if: github.head_ref == 'phase-2/image-assets'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase-2/image-assets
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+      - name: Refresh desktop Cargo lockfile
+        shell: pwsh
+        run: |
+          cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop Cargo lock refresh failed.' }
+          cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'Refreshed desktop Cargo lock is not reproducible with --locked.' }
+          $changed = @(git status --porcelain --untracked-files=normal)
+          $unexpected = @($changed | Where-Object {
+            $_ -notmatch 'apps/desktop/src-tauri/Cargo.lock$' -and
+            $_ -notmatch '\.github/workflows/branch-image-desktop-lock-helper.yml$'
+          })
+          if ($unexpected.Count -ne 0) {
+            Write-Host 'Unexpected source-tree changes:'
+            $unexpected | ForEach-Object { Write-Host $_ }
+            throw 'Desktop lock refresh changed files beyond the lockfile.'
+          }
+      - name: Commit refreshed lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/branch-image-desktop-lock-helper.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/desktop/src-tauri/Cargo.lock .github/workflows/branch-image-desktop-lock-helper.yml
+          git commit -m "Phase 2: refresh desktop lock for raster renderer dependency"
+          git push origin HEAD:phase-2/image-assets
