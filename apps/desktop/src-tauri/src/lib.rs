@@ -10,10 +10,13 @@ use std::{
 
 use app_core::ApplicationSession;
 use ddnx::PackageLimits;
+use editor_core::LayerTarget;
 use editor_runtime::RecoveryPlan;
 use next_domain::{
-    ConnectorLabelStyle, Document, DocumentDefaults, DocumentId, ElementId, Layer, LayerId,
-    NextArtifact, Page, PageId, Point, Rect, Scene, Size,
+    AnchorSet, ConnectorLabelStyle, Document, DocumentDefaults, DocumentId, Element, ElementId,
+    ElementKind, Layer, LayerId, NextArtifact, Page, PageId, Point, Rect, RichTextDocument,
+    RichTextToken, Scene, Size, TextBlock, TextHorizontalAlignment, TextLayout, TextStyle,
+    TextVerticalAlignment,
 };
 use platform_fs::{AtomicSaveError, CommitMode, DurabilityLevel, atomic_save};
 use render_plan::{RenderPlanOptions, build_page_plan};
@@ -196,6 +199,54 @@ struct SelectionRequest {
 struct MoveElementsRequest {
     element_ids: Vec<ElementId>,
     delta_mm: Point,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum BasicElementKind {
+    Rectangle,
+    Text,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateBasicElementRequest {
+    kind: BasicElementKind,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateElementPropertiesRequest {
+    element_id: ElementId,
+    bounds_mm: Rect,
+    rotation_deg: f64,
+    text: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ElementEditResultDto {
+    state: DocumentStateDto,
+    selected_element_ids: Vec<ElementId>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectionPropertiesDto {
+    count: usize,
+    primary: Option<ElementPropertiesDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ElementPropertiesDto {
+    element_id: ElementId,
+    name: String,
+    element_type: &'static str,
+    bounds_mm: Rect,
+    rotation_deg: f64,
+    text: Option<String>,
+    text_editable: bool,
 }
 
 #[tauri::command]
@@ -397,6 +448,180 @@ fn set_selection(
         .set_selection(request.element_ids)
         .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
     Ok(document_state_dto(&document))
+}
+
+#[tauri::command]
+fn selection_properties(
+    state: State<'_, DesktopState>,
+) -> Result<SelectionPropertiesDto, CommandError> {
+    let document = lock_document(&state)?;
+    let session = document.session.session();
+    let selected: Vec<_> = session.selection().iter().copied().collect();
+    let primary = if selected.len() == 1 {
+        let element = find_element(session.document(), selected[0]).ok_or_else(|| {
+            CommandError::new(
+                "selection_element_missing",
+                "The selected element no longer exists in the current document.",
+            )
+        })?;
+        Some(element_properties_dto(element))
+    } else {
+        None
+    };
+    Ok(SelectionPropertiesDto {
+        count: selected.len(),
+        primary,
+    })
+}
+
+#[tauri::command]
+fn create_basic_element(
+    request: CreateBasicElementRequest,
+    state: State<'_, DesktopState>,
+) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let (target, page_size) = {
+        let session = document.session.session();
+        let target = session.active_layer().ok_or_else(|| {
+            CommandError::new(
+                "no_active_layer",
+                "The current document has no active layer for element creation.",
+            )
+        })?;
+        let page_size = session
+            .active_page_id()
+            .and_then(|page_id| {
+                session
+                    .document()
+                    .pages
+                    .iter()
+                    .find(|page| page.id == page_id)
+                    .map(|page| page.size_mm)
+            })
+            .unwrap_or(Size {
+                width: 210.0,
+                height: 297.0,
+            });
+        (target, page_size)
+    };
+
+    let element_id = ElementId::new();
+    let (name, width, height, kind, text) = match request.kind {
+        BasicElementKind::Rectangle => (
+            "Rectangle".to_owned(),
+            40.0,
+            25.0,
+            ElementKind::Rectangle {
+                corner_radius_mm: 0.0,
+            },
+            None,
+        ),
+        BasicElementKind::Text => (
+            "Text".to_owned(),
+            60.0,
+            20.0,
+            ElementKind::Text,
+            Some(simple_text_block("Text", TextStyle::default(), None)),
+        ),
+    };
+    let bounds_mm = Rect {
+        x: ((page_size.width - width) / 2.0).max(0.0),
+        y: ((page_size.height - height) / 2.0).max(0.0),
+        width,
+        height,
+    };
+    let element = Element {
+        id: element_id,
+        name,
+        bounds_mm,
+        rotation_deg: 0.0,
+        anchors: AnchorSet::default(),
+        ports: Vec::new(),
+        style_id: None,
+        text,
+        kind,
+        import: None,
+    };
+
+    document
+        .session
+        .create_element(target, element, None)
+        .map_err(|error| CommandError::new("element_create_failed", error.to_string()))?;
+    document
+        .session
+        .set_selection([element_id])
+        .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
+    Ok(element_edit_result_dto(&document))
+}
+
+#[tauri::command]
+fn delete_selection(
+    state: State<'_, DesktopState>,
+) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let selected: Vec<_> = document
+        .session
+        .session()
+        .selection()
+        .iter()
+        .copied()
+        .collect();
+    if !selected.is_empty() {
+        document
+            .session
+            .delete_elements(selected)
+            .map_err(|error| CommandError::new("element_delete_failed", error.to_string()))?;
+        document.session.clear_selection();
+    }
+    Ok(element_edit_result_dto(&document))
+}
+
+#[tauri::command]
+fn update_element_properties(
+    request: UpdateElementPropertiesRequest,
+    state: State<'_, DesktopState>,
+) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let text_update = if let Some(text) = request.text {
+        let existing = find_element(document.session.session().document(), request.element_id)
+            .ok_or_else(|| {
+                CommandError::new(
+                    "element_properties_missing",
+                    "The selected element no longer exists in the current document.",
+                )
+            })?;
+        let Some(existing_text) = existing.text.as_ref() else {
+            return Err(CommandError::new(
+                "element_text_not_editable",
+                "This element does not contain editable text.",
+            ));
+        };
+        let (_, editable, common_style) = text_preview(existing_text);
+        if !editable {
+            return Err(CommandError::new(
+                "element_text_not_editable",
+                "This rich-text element cannot be flattened safely by the basic text editor.",
+            ));
+        }
+        Some(Some(simple_text_block(
+            &text,
+            common_style.unwrap_or_default(),
+            Some(existing_text.layout),
+        )))
+    } else {
+        None
+    };
+
+    document
+        .session
+        .commit_element_properties(
+            request.element_id,
+            request.bounds_mm,
+            request.rotation_deg,
+            text_update,
+        )
+        .map_err(|error| CommandError::new("element_properties_failed", error.to_string()))?;
+    Ok(element_edit_result_dto(&document))
 }
 
 #[tauri::command]
@@ -742,6 +967,137 @@ fn commit_move_elements(
     Ok(document_state_dto(&document))
 }
 
+fn element_edit_result_dto(document: &DesktopDocument) -> ElementEditResultDto {
+    ElementEditResultDto {
+        state: document_state_dto(document),
+        selected_element_ids: document
+            .session
+            .session()
+            .selection()
+            .iter()
+            .copied()
+            .collect(),
+    }
+}
+
+fn find_element(document: &Document, element_id: ElementId) -> Option<&Element> {
+    document
+        .master_layers
+        .iter()
+        .chain(document.pages.iter().flat_map(|page| page.layers.iter()))
+        .find_map(|layer| {
+            layer
+                .scene
+                .elements
+                .iter()
+                .find(|element| element.id == element_id)
+        })
+}
+
+fn element_properties_dto(element: &Element) -> ElementPropertiesDto {
+    let (text, text_editable) = match element.text.as_ref() {
+        Some(block) => {
+            let (preview, editable, _) = text_preview(block);
+            (Some(preview), editable)
+        }
+        None => (None, false),
+    };
+    ElementPropertiesDto {
+        element_id: element.id,
+        name: element.name.clone(),
+        element_type: element_type_name(&element.kind),
+        bounds_mm: element.bounds_mm,
+        rotation_deg: element.rotation_deg,
+        text,
+        text_editable,
+    }
+}
+
+fn element_type_name(kind: &ElementKind) -> &'static str {
+    match kind {
+        ElementKind::Text => "Text",
+        ElementKind::Rectangle { .. } => "Rectangle",
+        ElementKind::Ellipse => "Ellipse",
+        ElementKind::StraightConnector { .. } => "Straight connector",
+        ElementKind::OrthogonalConnector { .. } => "Orthogonal connector",
+        ElementKind::Image { .. } => "Image",
+        ElementKind::Metafile { .. } => "Metafile",
+        ElementKind::Group { .. } => "Group",
+        ElementKind::Polygon { .. } => "Polygon",
+        ElementKind::Flowchart { .. } => "Flowchart",
+        ElementKind::Curve { .. } => "Curve",
+        ElementKind::LayerReference { .. } => "Layer reference",
+    }
+}
+
+fn text_preview(block: &TextBlock) -> (String, bool, Option<TextStyle>) {
+    let mut preview = String::new();
+    let mut common_style: Option<TextStyle> = None;
+    let mut editable = block.content.tail.is_none() && block.content.diagnostics.is_empty();
+    for token in &block.content.tokens {
+        match token {
+            RichTextToken::Text { text, style } => {
+                preview.push_str(text);
+                if let Some(existing) = common_style.as_ref() {
+                    if existing != style {
+                        editable = false;
+                    }
+                } else {
+                    common_style = Some(style.clone());
+                }
+            }
+            RichTextToken::NewLine => preview.push('\n'),
+            RichTextToken::PageNumber { .. } => {
+                preview.push_str("{page}");
+                editable = false;
+            }
+            RichTextToken::PageCount { .. } => {
+                preview.push_str("{pages}");
+                editable = false;
+            }
+            RichTextToken::PageName { .. } => {
+                preview.push_str("{page name}");
+                editable = false;
+            }
+            RichTextToken::SymbolGlyph { legacy_glyph, .. } => {
+                preview.push(*legacy_glyph);
+                editable = false;
+            }
+        }
+    }
+    (preview, editable, common_style)
+}
+
+fn simple_text_block(
+    text: &str,
+    style: TextStyle,
+    layout: Option<TextLayout>,
+) -> TextBlock {
+    let mut tokens = Vec::new();
+    let mut lines = text.split('\n').peekable();
+    while let Some(line) = lines.next() {
+        tokens.push(RichTextToken::Text {
+            text: line.to_owned(),
+            style: style.clone(),
+        });
+        if lines.peek().is_some() {
+            tokens.push(RichTextToken::NewLine);
+        }
+    }
+    TextBlock {
+        content: RichTextDocument {
+            tokens,
+            tail: None,
+            diagnostics: Vec::new(),
+        },
+        layout: layout.unwrap_or(TextLayout {
+            horizontal: TextHorizontalAlignment::Left,
+            vertical: TextVerticalAlignment::Top,
+            margin_mm: 1.0,
+        }),
+    }
+}
+
 fn lock_document<'a>(
     state: &'a State<'_, DesktopState>,
 ) -> Result<MutexGuard<'a, DesktopDocument>, CommandError> {
@@ -922,6 +1278,10 @@ pub fn run() {
             document_state,
             candidate_page_presentation,
             set_selection,
+            selection_properties,
+            create_basic_element,
+            delete_selection,
+            update_element_properties,
             new_document,
             open_document,
             save_document,

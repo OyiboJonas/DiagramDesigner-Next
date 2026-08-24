@@ -2,9 +2,11 @@ use ddnx::{
     HydrationError, PackageIoError, PackageLimits, PersistenceComparisonError, PreparationError,
     compare_persistence, prepare_package, read_package, write_package_to_vec,
 };
-use editor_core::{EditCommand, EditorError, EditorSession, HistoryStateId};
+use editor_core::{
+    EditCommand, EditTransaction, EditorError, EditorSession, HistoryStateId, LayerTarget,
+};
 use editor_runtime::{EditorRuntime, RecoveryCheckpointKey, RecoveryPlan};
-use next_domain::{ElementId, NextArtifact, Point};
+use next_domain::{Element, ElementId, NextArtifact, Point, Rect, TextBlock};
 use thiserror::Error;
 
 const INITIAL_DOCUMENT_GENERATION: u64 = 1;
@@ -140,20 +142,78 @@ impl ApplicationSession {
 
     /// Commit the final document-space delta from a completed frontend move
     /// gesture. Raw pointer updates must never call this method.
+    fn execute_edit(&mut self, command: EditCommand) -> Result<bool, ApplicationError> {
+        let changed = self.runtime.session_mut().execute(command)?;
+        self.sync_editor_saved_marker();
+        Ok(changed)
+    }
+
+    fn execute_edit_transaction(
+        &mut self,
+        transaction: EditTransaction,
+    ) -> Result<bool, ApplicationError> {
+        let changed = self.runtime.session_mut().execute_transaction(transaction)?;
+        self.sync_editor_saved_marker();
+        Ok(changed)
+    }
+
     pub fn commit_move_elements(
         &mut self,
         element_ids: Vec<ElementId>,
         delta_mm: Point,
     ) -> Result<bool, ApplicationError> {
-        let changed = self
-            .runtime
-            .session_mut()
-            .execute(EditCommand::MoveElements {
-                element_ids,
-                delta_mm,
-            })?;
-        self.sync_editor_saved_marker();
-        Ok(changed)
+        self.execute_edit(EditCommand::MoveElements {
+            element_ids,
+            delta_mm,
+        })
+    }
+
+    /// Create one element through the editor-core semantic command boundary.
+    pub fn create_element(
+        &mut self,
+        target: LayerTarget,
+        element: Element,
+        z_index: Option<usize>,
+    ) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::CreateElement {
+            target,
+            element,
+            z_index,
+        })
+    }
+
+    /// Delete a selection as one semantic history step.
+    pub fn delete_elements(
+        &mut self,
+        element_ids: Vec<ElementId>,
+    ) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::DeleteElements { element_ids })
+    }
+
+    /// Commit bounds, rotation and an optional text replacement atomically.
+    ///
+    /// `text_update == None` leaves text untouched. `Some(None)` removes the text
+    /// block, while `Some(Some(_))` replaces it.
+    pub fn commit_element_properties(
+        &mut self,
+        element_id: ElementId,
+        bounds_mm: Rect,
+        rotation_deg: f64,
+        text_update: Option<Option<TextBlock>>,
+    ) -> Result<bool, ApplicationError> {
+        let mut transaction = EditTransaction::default();
+        transaction.push(EditCommand::SetBounds {
+            element_id,
+            bounds_mm,
+        });
+        transaction.push(EditCommand::SetRotation {
+            element_id,
+            rotation_deg,
+        });
+        if let Some(text) = text_update {
+            transaction.push(EditCommand::SetText { element_id, text });
+        }
+        self.execute_edit_transaction(transaction)
     }
 
     pub fn set_selection<I>(&mut self, element_ids: I) -> Result<(), ApplicationError>
@@ -438,4 +498,78 @@ mod tests {
 
         assert!(ApplicationSession::from_ddnx_bytes(&bytes, PackageLimits::default()).is_err());
     }
+
+    #[test]
+    fn constructive_application_commands_share_editor_history_and_dirty_state() {
+        let (artifact, _) = fixture();
+        let mut app = ApplicationSession::from_artifact(artifact).unwrap();
+        let target = app.session().active_layer().unwrap();
+        let created_id = ElementId::new();
+        let created = Element {
+            id: created_id,
+            name: "Created rectangle".to_owned(),
+            bounds_mm: Rect {
+                x: 15.0,
+                y: 25.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            rotation_deg: 0.0,
+            anchors: AnchorSet::default(),
+            ports: Vec::new(),
+            style_id: None,
+            text: None,
+            kind: ElementKind::Rectangle {
+                corner_radius_mm: 0.0,
+            },
+            import: None,
+        };
+
+        let initial = app.session().current_history_state();
+        assert!(app.create_element(target, created, None).unwrap());
+        let after_create = app.session().current_history_state();
+        assert_ne!(after_create, initial);
+        assert!(app.is_dirty());
+        assert!(app.session().document().pages[0].layers[0]
+            .scene
+            .elements
+            .iter()
+            .any(|element| element.id == created_id));
+
+        let updated_bounds = Rect {
+            x: 30.0,
+            y: 35.0,
+            width: 55.0,
+            height: 28.0,
+        };
+        assert!(app
+            .commit_element_properties(created_id, updated_bounds, 22.5, None)
+            .unwrap());
+        let created = app.session().document().pages[0].layers[0]
+            .scene
+            .elements
+            .iter()
+            .find(|element| element.id == created_id)
+            .unwrap();
+        assert_eq!(created.bounds_mm, updated_bounds);
+        assert_eq!(created.rotation_deg, 22.5);
+
+        assert!(app.delete_elements(vec![created_id]).unwrap());
+        assert!(!app.session().document().pages[0].layers[0]
+            .scene
+            .elements
+            .iter()
+            .any(|element| element.id == created_id));
+        assert!(app.undo().unwrap());
+        assert!(app.session().document().pages[0].layers[0]
+            .scene
+            .elements
+            .iter()
+            .any(|element| element.id == created_id));
+        assert!(app.undo().unwrap());
+        assert!(app.undo().unwrap());
+        assert_eq!(app.session().current_history_state(), initial);
+        assert!(!app.is_dirty());
+    }
+
 }
