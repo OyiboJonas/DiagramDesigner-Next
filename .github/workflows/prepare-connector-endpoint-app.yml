@@ -21,6 +21,25 @@ jobs:
         with:
           toolchain: 1.85.0
           components: rustfmt,clippy
+      - name: Correct preparation anchors
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/prepare-connector-endpoint-app.py")
+          text = path.read_text(encoding="utf-8")
+          old_anchor = '''    #[test]\n    fn move_commit_marks_document_dirty_and_drives_recovery() {\n'''
+          new_anchor = '''    #[test]\n    fn prepared_save_is_verified_but_does_not_mark_dirty_state_clean_before_ack() {\n'''
+          if old_anchor not in text:
+              raise SystemExit("old app-core test anchor not found")
+          text = text.replace(old_anchor, new_anchor, 1)
+          old_defaults = '''            defaults: defaults(),\n'''
+          new_defaults = '''            defaults: DocumentDefaults {\n                font_family: "Arial".to_owned(),\n                font_size_pt: 10.0,\n                font_style_bits: 0,\n                object_shadows: false,\n                auto_line_break: true,\n                connector_label_style: ConnectorLabelStyle::Transparent,\n            },\n'''
+          if old_defaults not in text:
+              raise SystemExit("defaults helper anchor not found")
+          text = text.replace(old_defaults, new_defaults, 1)
+          path.write_text(text, encoding="utf-8")
+          PY
       - name: Apply connector endpoint application slice
         run: python scripts/prepare-connector-endpoint-app.py
       - name: Format application core
