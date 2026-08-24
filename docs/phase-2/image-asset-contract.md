@@ -55,7 +55,8 @@ Public regression coverage must verify at least:
 - typed missing/unsupported/malformed asset diagnostics;
 - cold render-plan versus `PreparedPage` viewport equivalence;
 - deterministic fidelity-scene materialization of a small synthetic raster image;
-- workspace formatting and Clippy cleanliness on the pinned Rust 1.85 toolchain.
+- workspace formatting and Clippy cleanliness on the pinned Rust 1.85 toolchain;
+- the separate Tauri desktop `Cargo.lock` remains synchronized whenever renderer dependencies change so Windows `--locked` builds stay reproducible.
 
 No private `.ddd` fixture or private-corpus metadata is required or published for this work.
 
