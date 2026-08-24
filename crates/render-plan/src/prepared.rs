@@ -4,7 +4,7 @@ use next_domain::{Document, Element, LayerId, PageId, Rect};
 
 use crate::{
     LayerScope, PlannedElement, RenderDiagnostic, RenderPlan, RenderPlanError, RenderPlanOptions,
-    RenderPrimitiveFamily, build_page_plan, expand_rect, rects_intersect, rotated_aabb,
+    RenderPrimitiveFamily, build_page_plan, element_cull_bounds, expand_rect, rects_intersect,
     validate_options,
 };
 
@@ -81,8 +81,7 @@ impl PreparedPage {
         let mut entries = Vec::with_capacity(base.items.len());
 
         for planned in base.items {
-            let cull_bounds_mm = finite_rect(planned.element.bounds_mm)
-                .then(|| rotated_aabb(planned.element.bounds_mm, planned.element.rotation_deg));
+            let cull_bounds_mm = element_cull_bounds(planned.element);
             let ordinal = entries.len();
             if let Some(bounds) = cull_bounds_mm {
                 spatial.insert(ordinal, bounds);
@@ -162,10 +161,6 @@ fn prepared_as_planned(entry: &PreparedElement) -> PlannedElement<'_> {
         family: entry.family,
         element: &entry.element,
     }
-}
-
-fn finite_rect(rect: Rect) -> bool {
-    rect.x.is_finite() && rect.y.is_finite() && rect.width.is_finite() && rect.height.is_finite()
 }
 
 #[derive(Debug, Clone, Copy)]
