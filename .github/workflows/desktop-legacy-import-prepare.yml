@@ -1,17 +1,16 @@
 name: Prepare desktop legacy import
 
 on:
-  push:
-    branches: [desktop-legacy-open-import]
-    paths:
-      - scripts/prepare-desktop-legacy-import.py
-      - .github/workflows/desktop-legacy-import-prepare.yml
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   prepare:
+    if: github.head_ref == 'desktop-legacy-open-import'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
