@@ -323,9 +323,9 @@ fn base64_encode(bytes: &[u8]) -> String {
         let b1 = bytes.get(index + 1).copied();
         let b2 = bytes.get(index + 2).copied();
         output.push(TABLE[(b0 >> 2) as usize] as char);
-        output.push(TABLE[(((b0 & 0x03) << 4) | b1.unwrap_or(0) >> 4) as usize] as char);
+        output.push(TABLE[(((b0 & 0x03) << 4) | (b1.unwrap_or(0) >> 4)) as usize] as char);
         if let Some(b1) = b1 {
-            output.push(TABLE[(((b1 & 0x0f) << 2) | b2.unwrap_or(0) >> 6) as usize] as char);
+            output.push(TABLE[(((b1 & 0x0f) << 2) | (b2.unwrap_or(0) >> 6)) as usize] as char);
         } else {
             output.push('=');
         }

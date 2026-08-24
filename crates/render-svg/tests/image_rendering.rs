@@ -79,6 +79,7 @@ fn document(elements: Vec<Element>, assets: Vec<Asset>) -> (Document, next_domai
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn raster_asset(
     id: AssetId,
     width: i32,
