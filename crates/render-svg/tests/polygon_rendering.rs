@@ -129,13 +129,13 @@ fn maps_normalized_vertices_into_bounds_and_preserves_plan_order_and_rotation() 
 
     assert_eq!(output.rendered_elements, 3);
     assert_eq!(output.skipped_elements, 0);
+    assert!(output.svg.contains("points=\"10,20 50,20 30,50\""));
+    assert!(output.svg.contains("transform=\"rotate(30 30 35)\""));
     assert!(
         output
             .svg
-            .contains("points=\"10,20 50,20 30,50\"")
+            .contains("stroke=\"#000000\" stroke-width=\"0.25\" fill=\"none\"")
     );
-    assert!(output.svg.contains("transform=\"rotate(30 30 35)\""));
-    assert!(output.svg.contains("stroke=\"#000000\" stroke-width=\"0.25\" fill=\"none\""));
 
     let before_pos = output.svg.find(&before_id.0.to_string()).unwrap();
     let polygon_pos = output.svg.find(&polygon_id.0.to_string()).unwrap();
@@ -189,11 +189,31 @@ fn reuses_shape_stroke_fill_gradient_alpha_and_system_palette_fallback() {
     let (document, page_id) = document(vec![shape], vec![style]);
     let output = render(&document, page_id);
 
-    assert!(output.svg.contains("stroke=\"#808080\" stroke-width=\"1.5\""));
-    assert!(output.svg.contains("<linearGradient id=\"ddn-polygon-gradient-"));
-    assert!(output.svg.contains("x1=\"0%\" y1=\"0%\" x2=\"0%\" y2=\"100%\""));
-    assert!(output.svg.contains("stop-color=\"#0a141e\" stop-opacity=\"0.502\""));
-    assert!(output.svg.contains("stop-color=\"#c8d2dc\" stop-opacity=\"0.251\""));
+    assert!(
+        output
+            .svg
+            .contains("stroke=\"#808080\" stroke-width=\"1.5\"")
+    );
+    assert!(
+        output
+            .svg
+            .contains("<linearGradient id=\"ddn-polygon-gradient-")
+    );
+    assert!(
+        output
+            .svg
+            .contains("x1=\"0%\" y1=\"0%\" x2=\"0%\" y2=\"100%\"")
+    );
+    assert!(
+        output
+            .svg
+            .contains("stop-color=\"#0a141e\" stop-opacity=\"0.502\"")
+    );
+    assert!(
+        output
+            .svg
+            .contains("stop-color=\"#c8d2dc\" stop-opacity=\"0.251\"")
+    );
     assert!(output.diagnostics.iter().any(|diagnostic| matches!(
         diagnostic,
         SvgDiagnostic::SystemPaletteFallback { element_id, index: 7 }
@@ -231,11 +251,7 @@ fn preserves_legacy_two_point_polygon_minimum() {
 #[test]
 fn malformed_polygon_stays_skipped_with_explicit_geometry_diagnostic() {
     let polygon_id = ElementId::new();
-    let shape = polygon(
-        polygon_id,
-        None,
-        vec![NormalizedPoint { x: 0.0, y: 0.0 }],
-    );
+    let shape = polygon(polygon_id, None, vec![NormalizedPoint { x: 0.0, y: 0.0 }]);
     let (document, page_id) = document(vec![shape], Vec::new());
     let output = render(&document, page_id);
 
