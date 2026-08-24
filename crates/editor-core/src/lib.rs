@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use next_domain::{
-    Artifact, Color, Connection, Connector, Document, Element, ElementId, ElementKind, Layer,
-    LayerId, NextArtifact, Page, PageId, Point, PortId, Rect, Scene, Size, StyleId, TextBlock,
-    ValidationReport,
+    Artifact, Color, Connection, Connector, Document, Element, ElementId, ElementKind, Endpoint,
+    Layer, LayerId, NextArtifact, Page, PageId, Point, PortId, Rect, Scene, Size, StyleId,
+    TextBlock, ValidationReport,
 };
 use thiserror::Error;
 
@@ -49,6 +49,12 @@ pub enum LayerTarget {
     Page { page_id: PageId, layer_id: LayerId },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConnectorEndpointSide {
+    Start,
+    End,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
     CreatePage {
@@ -89,6 +95,15 @@ pub enum EditCommand {
     SetRotation {
         element_id: ElementId,
         rotation_deg: f64,
+    },
+    /// Edit one connector endpoint. `position_mm` is the free endpoint position.
+    /// When `connection` is present, editor-core resolves the canonical document
+    /// position from the referenced target port instead of trusting view state.
+    SetConnectorEndpoint {
+        element_id: ElementId,
+        side: ConnectorEndpointSide,
+        position_mm: Point,
+        connection: Option<Connection>,
     },
     SetElementStyle {
         element_ids: Vec<ElementId>,
@@ -214,6 +229,24 @@ impl EditTransaction {
                     coalesced = true;
                 }
                 (
+                    EditCommand::SetConnectorEndpoint {
+                        element_id: previous_id,
+                        side: previous_side,
+                        position_mm: previous_position,
+                        connection: previous_connection,
+                    },
+                    EditCommand::SetConnectorEndpoint {
+                        element_id,
+                        side,
+                        position_mm,
+                        connection,
+                    },
+                ) if previous_id == element_id && previous_side == side => {
+                    *previous_position = *position_mm;
+                    *previous_connection = *connection;
+                    coalesced = true;
+                }
+                (
                     EditCommand::SetElementStyle {
                         element_ids: previous_ids,
                         style_id: previous_style_id,
@@ -312,6 +345,20 @@ pub enum EditorError {
     ElementAlreadyExists(ElementId),
     #[error("port {0:?} already exists")]
     PortAlreadyExists(PortId),
+    #[error("port {port_id:?} does not exist on element {element_id:?}")]
+    PortNotFound {
+        element_id: ElementId,
+        port_id: PortId,
+    },
+    #[error("element {0:?} does not expose connector endpoint geometry")]
+    ElementIsNotConnector(ElementId),
+    #[error(
+        "connector {source_element_id:?} and target {target_element_id:?} are not in the same scene"
+    )]
+    ConnectionTargetDifferentScene {
+        source_element_id: ElementId,
+        target_element_id: ElementId,
+    },
     #[error("layer {0:?} is locked")]
     LayerLocked(LayerId),
     #[error("style {0:?} does not exist")]
@@ -361,16 +408,10 @@ enum SiblingOwner {
     Group(ElementId),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EndpointSide {
-    Start,
-    End,
-}
-
 #[derive(Debug, Clone)]
 struct DetachedConnection {
     source_element_id: ElementId,
-    side: EndpointSide,
+    side: ConnectorEndpointSide,
     connection: Connection,
 }
 
@@ -425,6 +466,11 @@ enum UndoStep {
     SetRotation {
         element_id: ElementId,
         rotation_deg: f64,
+    },
+    SetConnectorEndpoint {
+        element_id: ElementId,
+        side: ConnectorEndpointSide,
+        endpoint: Endpoint,
     },
     SetElementStyles {
         previous: Vec<(ElementId, Option<StyleId>)>,
@@ -918,6 +964,12 @@ fn apply_command(
             element_id,
             rotation_deg,
         } => apply_set_rotation(document, *element_id, *rotation_deg),
+        EditCommand::SetConnectorEndpoint {
+            element_id,
+            side,
+            position_mm,
+            connection,
+        } => apply_set_connector_endpoint(document, *element_id, *side, *position_mm, *connection),
         EditCommand::SetElementStyle {
             element_ids,
             style_id,
@@ -1148,6 +1200,7 @@ fn apply_move(
             .ok_or(EditorError::ElementNotFound(*element_id))?;
         translate_element_geometry(element, delta_mm);
     }
+    synchronize_connected_endpoints(document)?;
 
     Ok(Some(AppliedCommand {
         undo: UndoStep::MoveElements {
@@ -1187,6 +1240,7 @@ fn apply_set_bounds(
     }
     let previous = element.bounds_mm;
     element.bounds_mm = bounds_mm;
+    synchronize_connected_endpoints(document)?;
     Ok(Some(AppliedCommand {
         undo: UndoStep::SetBounds {
             element_id,
@@ -1222,12 +1276,71 @@ fn apply_set_rotation(
     }
     let previous = element.rotation_deg;
     element.rotation_deg = rotation_deg;
+    synchronize_connected_endpoints(document)?;
     Ok(Some(AppliedCommand {
         undo: UndoStep::SetRotation {
             element_id,
             rotation_deg: previous,
         },
         structural: false,
+    }))
+}
+
+fn apply_set_connector_endpoint(
+    document: &mut Document,
+    element_id: ElementId,
+    side: ConnectorEndpointSide,
+    position_mm: Point,
+    connection: Option<Connection>,
+) -> Result<Option<AppliedCommand>, EditorError> {
+    if !point_is_finite(position_mm) {
+        return Err(EditorError::InvalidGeometry);
+    }
+    ensure_element_editable(document, element_id)?;
+    if connector(
+        find_element(document, element_id).ok_or(EditorError::ElementNotFound(element_id))?,
+    )
+    .is_none()
+    {
+        return Err(EditorError::ElementIsNotConnector(element_id));
+    }
+
+    let resolved_position = match connection {
+        Some(connection) => resolve_connection_position(document, element_id, connection)?,
+        None => position_mm,
+    };
+    let next = Endpoint {
+        position_mm: resolved_position,
+        connection,
+    };
+    let previous = connector_endpoint(
+        connector(
+            find_element(document, element_id).ok_or(EditorError::ElementNotFound(element_id))?,
+        )
+        .ok_or(EditorError::ElementIsNotConnector(element_id))?,
+        side,
+    )
+    .clone();
+    if previous == next {
+        return Ok(None);
+    }
+
+    let element =
+        find_element_mut(document, element_id).ok_or(EditorError::HistoryInvariantViolation)?;
+    let endpoint = connector_endpoint_mut(
+        connector_mut(element).ok_or(EditorError::HistoryInvariantViolation)?,
+        side,
+    );
+    *endpoint = next;
+
+    Ok(Some(AppliedCommand {
+        undo: UndoStep::SetConnectorEndpoint {
+            element_id,
+            side,
+            endpoint: previous,
+        },
+        // Connection references participate in Next-domain structural validation.
+        structural: true,
     }))
 }
 
@@ -1721,6 +1834,7 @@ fn apply_undo_step(document: &mut Document, step: &UndoStep) -> Result<(), Edito
                     .ok_or(EditorError::HistoryInvariantViolation)?;
                 translate_element_geometry(element, *delta_mm);
             }
+            synchronize_connected_endpoints(document)?;
         }
         UndoStep::SetBounds {
             element_id,
@@ -1729,6 +1843,7 @@ fn apply_undo_step(document: &mut Document, step: &UndoStep) -> Result<(), Edito
             let element = find_element_mut(document, *element_id)
                 .ok_or(EditorError::HistoryInvariantViolation)?;
             element.bounds_mm = *bounds_mm;
+            synchronize_connected_endpoints(document)?;
         }
         UndoStep::SetRotation {
             element_id,
@@ -1737,6 +1852,20 @@ fn apply_undo_step(document: &mut Document, step: &UndoStep) -> Result<(), Edito
             let element = find_element_mut(document, *element_id)
                 .ok_or(EditorError::HistoryInvariantViolation)?;
             element.rotation_deg = *rotation_deg;
+            synchronize_connected_endpoints(document)?;
+        }
+        UndoStep::SetConnectorEndpoint {
+            element_id,
+            side,
+            endpoint,
+        } => {
+            let element = find_element_mut(document, *element_id)
+                .ok_or(EditorError::HistoryInvariantViolation)?;
+            *connector_endpoint_mut(
+                connector_mut(element).ok_or(EditorError::HistoryInvariantViolation)?,
+                *side,
+            ) = endpoint.clone();
+            synchronize_connected_endpoints(document)?;
         }
         UndoStep::SetElementStyles { previous } => {
             for (element_id, style_id) in previous {
@@ -1861,8 +1990,10 @@ fn restore_detached_connections(
             .ok_or(EditorError::HistoryInvariantViolation)?;
         let connector = connector_mut(element).ok_or(EditorError::HistoryInvariantViolation)?;
         match connection.side {
-            EndpointSide::Start => connector.start.connection = Some(connection.connection),
-            EndpointSide::End => connector.end.connection = Some(connection.connection),
+            ConnectorEndpointSide::Start => {
+                connector.start.connection = Some(connection.connection)
+            }
+            ConnectorEndpointSide::End => connector.end.connection = Some(connection.connection),
         }
     }
     Ok(())
@@ -1886,7 +2017,7 @@ fn detach_deleted_connections(
             if delete_ids.contains(&connection.element_id) {
                 detached.push(DetachedConnection {
                     source_element_id,
-                    side: EndpointSide::Start,
+                    side: ConnectorEndpointSide::Start,
                     connection,
                 });
                 connector.start.connection = None;
@@ -1896,7 +2027,7 @@ fn detach_deleted_connections(
             if delete_ids.contains(&connection.element_id) {
                 detached.push(DetachedConnection {
                     source_element_id,
-                    side: EndpointSide::End,
+                    side: ConnectorEndpointSide::End,
                     connection,
                 });
                 connector.end.connection = None;
@@ -1979,8 +2110,7 @@ fn translate_element_geometry(element: &mut Element, delta_mm: Point) {
     match &mut element.kind {
         ElementKind::StraightConnector { connector }
         | ElementKind::OrthogonalConnector { connector, .. } => {
-            translate_point(&mut connector.start.position_mm, delta_mm);
-            translate_point(&mut connector.end.position_mm, delta_mm);
+            translate_free_connector_geometry(connector, delta_mm);
         }
         ElementKind::Curve {
             connector,
@@ -1991,12 +2121,136 @@ fn translate_element_geometry(element: &mut Element, delta_mm: Point) {
                 translate_point(point, delta_mm);
             }
             if let Some(connector) = connector {
-                translate_point(&mut connector.start.position_mm, delta_mm);
-                translate_point(&mut connector.end.position_mm, delta_mm);
+                translate_free_connector_geometry(connector, delta_mm);
             }
         }
         _ => {}
     }
+}
+
+fn translate_free_connector_geometry(connector: &mut Connector, delta_mm: Point) {
+    if connector.start.connection.is_none() {
+        translate_point(&mut connector.start.position_mm, delta_mm);
+    }
+    if connector.end.connection.is_none() {
+        translate_point(&mut connector.end.position_mm, delta_mm);
+    }
+}
+
+fn connector(element: &Element) -> Option<&Connector> {
+    match &element.kind {
+        ElementKind::StraightConnector { connector }
+        | ElementKind::OrthogonalConnector { connector, .. } => Some(connector),
+        ElementKind::Curve {
+            connector: Some(connector),
+            ..
+        } => Some(connector),
+        _ => None,
+    }
+}
+
+fn connector_endpoint(connector: &Connector, side: ConnectorEndpointSide) -> &Endpoint {
+    match side {
+        ConnectorEndpointSide::Start => &connector.start,
+        ConnectorEndpointSide::End => &connector.end,
+    }
+}
+
+fn connector_endpoint_mut(connector: &mut Connector, side: ConnectorEndpointSide) -> &mut Endpoint {
+    match side {
+        ConnectorEndpointSide::Start => &mut connector.start,
+        ConnectorEndpointSide::End => &mut connector.end,
+    }
+}
+
+fn point_is_finite(point: Point) -> bool {
+    point.x.is_finite() && point.y.is_finite()
+}
+
+fn resolve_connection_position(
+    document: &Document,
+    source_element_id: ElementId,
+    connection: Connection,
+) -> Result<Point, EditorError> {
+    let source_target = layer_target_for_element(document, source_element_id)
+        .ok_or(EditorError::ElementNotFound(source_element_id))?;
+    let target_target = layer_target_for_element(document, connection.element_id)
+        .ok_or(EditorError::ElementNotFound(connection.element_id))?;
+    if source_target != target_target {
+        return Err(EditorError::ConnectionTargetDifferentScene {
+            source_element_id,
+            target_element_id: connection.element_id,
+        });
+    }
+    let target = find_element(document, connection.element_id)
+        .ok_or(EditorError::ElementNotFound(connection.element_id))?;
+    port_document_position(target, connection.port_id)
+}
+
+fn port_document_position(target: &Element, port_id: PortId) -> Result<Point, EditorError> {
+    let port =
+        target
+            .ports
+            .iter()
+            .find(|port| port.id == port_id)
+            .ok_or(EditorError::PortNotFound {
+                element_id: target.id,
+                port_id,
+            })?;
+    let center = Point {
+        x: target.bounds_mm.x + target.bounds_mm.width / 2.0,
+        y: target.bounds_mm.y + target.bounds_mm.height / 2.0,
+    };
+    let unrotated = Point {
+        x: target.bounds_mm.x + port.position.x * target.bounds_mm.width,
+        y: target.bounds_mm.y + port.position.y * target.bounds_mm.height,
+    };
+    if target.rotation_deg == 0.0 {
+        return Ok(unrotated);
+    }
+    let radians = target.rotation_deg.to_radians();
+    let dx = unrotated.x - center.x;
+    let dy = unrotated.y - center.y;
+    Ok(Point {
+        x: center.x + dx * radians.cos() - dy * radians.sin(),
+        y: center.y + dx * radians.sin() + dy * radians.cos(),
+    })
+}
+
+fn synchronize_connected_endpoints(document: &mut Document) -> Result<(), EditorError> {
+    let mut updates = Vec::new();
+    for layer in all_layers(document) {
+        for source in &layer.scene.elements {
+            let Some(connector) = connector(source) else {
+                continue;
+            };
+            for side in [ConnectorEndpointSide::Start, ConnectorEndpointSide::End] {
+                let Some(connection) = connector_endpoint(connector, side).connection else {
+                    continue;
+                };
+                let target = layer
+                    .scene
+                    .elements
+                    .iter()
+                    .find(|element| element.id == connection.element_id)
+                    .ok_or(EditorError::HistoryInvariantViolation)?;
+                let position = port_document_position(target, connection.port_id)
+                    .map_err(|_| EditorError::HistoryInvariantViolation)?;
+                updates.push((source.id, side, position));
+            }
+        }
+    }
+
+    for (element_id, side, position) in updates {
+        let element =
+            find_element_mut(document, element_id).ok_or(EditorError::HistoryInvariantViolation)?;
+        connector_endpoint_mut(
+            connector_mut(element).ok_or(EditorError::HistoryInvariantViolation)?,
+            side,
+        )
+        .position_mm = position;
+    }
+    Ok(())
 }
 
 fn connector_mut(element: &mut Element) -> Option<&mut Connector> {
@@ -2553,6 +2807,291 @@ mod tests {
                 margin_mm,
             },
         }
+    }
+
+    fn endpoint_connection_fixture(
+        locked: bool,
+    ) -> (EditorSession, ElementId, ElementId, ElementId, PortId) {
+        let (session, source_id, target_id, master_id, _) = fixture(locked);
+        let port_id = PortId::new();
+        let mut document = session.document().clone();
+        {
+            let target = find_element_mut(&mut document, target_id).unwrap();
+            target.ports.push(Port {
+                id: port_id,
+                index: 0,
+                position: NormalizedPoint { x: 1.0, y: 0.5 },
+            });
+        }
+        {
+            let source = find_element_mut(&mut document, source_id).unwrap();
+            source.kind = ElementKind::StraightConnector {
+                connector: Connector {
+                    start: Endpoint {
+                        position_mm: Point { x: 1.0, y: 2.0 },
+                        connection: None,
+                    },
+                    end: Endpoint {
+                        position_mm: Point { x: 11.0, y: 7.0 },
+                        connection: None,
+                    },
+                    start_marker: MarkerStyle::None,
+                    end_marker: MarkerStyle::None,
+                    line_style: LineStyle::Solid,
+                    secondary_color: None,
+                },
+            };
+        }
+        (
+            EditorSession::from_artifact(NextArtifact::document(document)).unwrap(),
+            source_id,
+            target_id,
+            master_id,
+            port_id,
+        )
+    }
+
+    fn connector_endpoint_value(
+        session: &EditorSession,
+        element_id: ElementId,
+        side: ConnectorEndpointSide,
+    ) -> Endpoint {
+        connector_endpoint(
+            connector(find_element(session.document(), element_id).unwrap()).unwrap(),
+            side,
+        )
+        .clone()
+    }
+
+    #[test]
+    fn connector_endpoint_connection_is_canonical_and_undoable() {
+        let (mut session, source, target, _, port_id) = endpoint_connection_fixture(false);
+        let connection = Connection {
+            element_id: target,
+            port_id,
+        };
+        session
+            .execute(EditCommand::SetConnectorEndpoint {
+                element_id: source,
+                side: ConnectorEndpointSide::Start,
+                position_mm: Point {
+                    x: -999.0,
+                    y: -999.0,
+                },
+                connection: Some(connection),
+            })
+            .unwrap();
+
+        let connected = connector_endpoint_value(&session, source, ConnectorEndpointSide::Start);
+        assert_eq!(connected.connection, Some(connection));
+        assert_eq!(connected.position_mm, Point { x: 30.0, y: 32.5 });
+
+        session.undo().unwrap();
+        let free = connector_endpoint_value(&session, source, ConnectorEndpointSide::Start);
+        assert_eq!(free.connection, None);
+        assert_eq!(free.position_mm, Point { x: 1.0, y: 2.0 });
+
+        session.redo().unwrap();
+        assert_eq!(
+            connector_endpoint_value(&session, source, ConnectorEndpointSide::Start).position_mm,
+            Point { x: 30.0, y: 32.5 }
+        );
+    }
+
+    #[test]
+    fn connector_endpoint_connection_validates_source_scene_port_and_lock() {
+        let (mut session, source, target, master, port_id) = endpoint_connection_fixture(false);
+        let missing_port = PortId::new();
+        let error = session
+            .execute(EditCommand::SetConnectorEndpoint {
+                element_id: source,
+                side: ConnectorEndpointSide::Start,
+                position_mm: Point::default(),
+                connection: Some(Connection {
+                    element_id: target,
+                    port_id: missing_port,
+                }),
+            })
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            EditorError::PortNotFound { element_id, port_id }
+                if element_id == target && port_id == missing_port
+        ));
+
+        {
+            let document = &mut session.document;
+            find_element_mut(document, master)
+                .unwrap()
+                .ports
+                .push(Port {
+                    id: PortId::new(),
+                    index: 0,
+                    position: NormalizedPoint { x: 0.5, y: 0.5 },
+                });
+        }
+        let master_port = find_element(session.document(), master).unwrap().ports[0].id;
+        let error = session
+            .execute(EditCommand::SetConnectorEndpoint {
+                element_id: source,
+                side: ConnectorEndpointSide::Start,
+                position_mm: Point::default(),
+                connection: Some(Connection {
+                    element_id: master,
+                    port_id: master_port,
+                }),
+            })
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            EditorError::ConnectionTargetDifferentScene {
+                source_element_id,
+                target_element_id
+            } if source_element_id == source && target_element_id == master
+        ));
+
+        let (mut locked, locked_source, locked_target, _, locked_port) =
+            endpoint_connection_fixture(true);
+        let error = locked
+            .execute(EditCommand::SetConnectorEndpoint {
+                element_id: locked_source,
+                side: ConnectorEndpointSide::Start,
+                position_mm: Point::default(),
+                connection: Some(Connection {
+                    element_id: locked_target,
+                    port_id: locked_port,
+                }),
+            })
+            .unwrap_err();
+        assert!(matches!(error, EditorError::LayerLocked(_)));
+
+        // A non-connector can never acquire hidden endpoint state.
+        let error = session
+            .execute(EditCommand::SetConnectorEndpoint {
+                element_id: target,
+                side: ConnectorEndpointSide::Start,
+                position_mm: Point { x: 1.0, y: 1.0 },
+                connection: None,
+            })
+            .unwrap_err();
+        assert!(matches!(error, EditorError::ElementIsNotConnector(id) if id == target));
+
+        // Keep the valid port referenced so the fixture remains meaningful.
+        assert_eq!(
+            port_id,
+            find_element(session.document(), target).unwrap().ports[0].id
+        );
+    }
+
+    #[test]
+    fn connected_endpoint_tracks_target_move_without_double_translation() {
+        let (mut session, source, target, _, port_id) = endpoint_connection_fixture(false);
+        session
+            .execute(EditCommand::SetConnectorEndpoint {
+                element_id: source,
+                side: ConnectorEndpointSide::Start,
+                position_mm: Point::default(),
+                connection: Some(Connection {
+                    element_id: target,
+                    port_id,
+                }),
+            })
+            .unwrap();
+
+        session
+            .execute(EditCommand::MoveElements {
+                element_ids: vec![target],
+                delta_mm: Point { x: 5.0, y: -2.0 },
+            })
+            .unwrap();
+        assert_eq!(
+            connector_endpoint_value(&session, source, ConnectorEndpointSide::Start).position_mm,
+            Point { x: 35.0, y: 30.5 }
+        );
+        session.undo().unwrap();
+        assert_eq!(
+            connector_endpoint_value(&session, source, ConnectorEndpointSide::Start).position_mm,
+            Point { x: 30.0, y: 32.5 }
+        );
+
+        session
+            .execute(EditCommand::MoveElements {
+                element_ids: vec![source],
+                delta_mm: Point { x: 4.0, y: 3.0 },
+            })
+            .unwrap();
+        let start = connector_endpoint_value(&session, source, ConnectorEndpointSide::Start);
+        let end = connector_endpoint_value(&session, source, ConnectorEndpointSide::End);
+        assert_eq!(start.position_mm, Point { x: 30.0, y: 32.5 });
+        assert_eq!(end.position_mm, Point { x: 15.0, y: 10.0 });
+        session.undo().unwrap();
+
+        session
+            .execute(EditCommand::MoveElements {
+                element_ids: vec![source, target],
+                delta_mm: Point { x: 4.0, y: 3.0 },
+            })
+            .unwrap();
+        let start = connector_endpoint_value(&session, source, ConnectorEndpointSide::Start);
+        let end = connector_endpoint_value(&session, source, ConnectorEndpointSide::End);
+        assert_eq!(start.position_mm, Point { x: 34.0, y: 35.5 });
+        assert_eq!(end.position_mm, Point { x: 15.0, y: 10.0 });
+    }
+
+    #[test]
+    fn connected_endpoint_tracks_target_bounds_and_rotation_with_undo_redo() {
+        let (mut session, source, target, _, port_id) = endpoint_connection_fixture(false);
+        session
+            .execute(EditCommand::SetConnectorEndpoint {
+                element_id: source,
+                side: ConnectorEndpointSide::Start,
+                position_mm: Point::default(),
+                connection: Some(Connection {
+                    element_id: target,
+                    port_id,
+                }),
+            })
+            .unwrap();
+        session
+            .execute(EditCommand::SetBounds {
+                element_id: target,
+                bounds_mm: Rect {
+                    x: 40.0,
+                    y: 50.0,
+                    width: 20.0,
+                    height: 10.0,
+                },
+            })
+            .unwrap();
+        assert_eq!(
+            connector_endpoint_value(&session, source, ConnectorEndpointSide::Start).position_mm,
+            Point { x: 60.0, y: 55.0 }
+        );
+        session
+            .execute(EditCommand::SetRotation {
+                element_id: target,
+                rotation_deg: 90.0,
+            })
+            .unwrap();
+        let rotated = connector_endpoint_value(&session, source, ConnectorEndpointSide::Start);
+        assert!((rotated.position_mm.x - 50.0).abs() < 1e-9);
+        assert!((rotated.position_mm.y - 65.0).abs() < 1e-9);
+
+        session.undo().unwrap();
+        assert_eq!(
+            connector_endpoint_value(&session, source, ConnectorEndpointSide::Start).position_mm,
+            Point { x: 60.0, y: 55.0 }
+        );
+        session.undo().unwrap();
+        assert_eq!(
+            connector_endpoint_value(&session, source, ConnectorEndpointSide::Start).position_mm,
+            Point { x: 30.0, y: 32.5 }
+        );
+        session.redo().unwrap();
+        session.redo().unwrap();
+        let rotated = connector_endpoint_value(&session, source, ConnectorEndpointSide::Start);
+        assert!((rotated.position_mm.x - 50.0).abs() < 1e-9);
+        assert!((rotated.position_mm.y - 65.0).abs() < 1e-9);
     }
 
     #[test]
