@@ -19,26 +19,38 @@ jobs:
         with:
           toolchain: 1.85.0
           components: rustfmt, clippy
-      - name: Make Base64 precedence explicit
+      - name: Make raster image code Clippy-clean
         shell: python
         run: |
           from pathlib import Path
-          path = Path('crates/render-svg/src/image.rs')
-          text = path.read_text(encoding='utf-8')
+
+          image_path = Path('crates/render-svg/src/image.rs')
+          image_text = image_path.read_text(encoding='utf-8')
           replacements = {
               '((b0 & 0x03) << 4) | b1.unwrap_or(0) >> 4': '((b0 & 0x03) << 4) | (b1.unwrap_or(0) >> 4)',
               '((b1 & 0x0f) << 2) | b2.unwrap_or(0) >> 6': '((b1 & 0x0f) << 2) | (b2.unwrap_or(0) >> 6)',
           }
           for old, new in replacements.items():
-              if old not in text:
+              if old not in image_text:
                   raise SystemExit(f'expected expression not found: {old}')
-              text = text.replace(old, new, 1)
-          path.write_text(text, encoding='utf-8')
-      - name: Verify formatting and Clippy
+              image_text = image_text.replace(old, new, 1)
+          image_path.write_text(image_text, encoding='utf-8')
+
+          test_path = Path('crates/render-svg/tests/image_rendering.rs')
+          test_text = test_path.read_text(encoding='utf-8')
+          old = 'fn raster_asset(\n'
+          new = '#[allow(clippy::too_many_arguments)]\nfn raster_asset(\n'
+          if new not in test_text:
+              if old not in test_text:
+                  raise SystemExit('raster_asset helper not found')
+              test_text = test_text.replace(old, new, 1)
+          test_path.write_text(test_text, encoding='utf-8')
+      - name: Verify formatting, Clippy and renderer tests
         run: |
           cargo fmt --all
           cargo clippy --locked --workspace --all-targets -- -D warnings
           cargo test --locked -p render-svg
+          cargo check --locked -p render-svg --example fidelity_scene
       - name: Commit fix
         shell: bash
         run: |
@@ -47,5 +59,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Phase 2: make raster Base64 encoding Clippy-clean"
+          git commit -m "Phase 2: make raster image rendering Clippy-clean"
           git push origin HEAD:phase-2/image-assets
