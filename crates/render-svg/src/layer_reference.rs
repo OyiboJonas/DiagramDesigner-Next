@@ -68,13 +68,15 @@ pub(super) fn apply_layer_references(
         let nested = nested_result?;
 
         append_unique_diagnostics(&mut nested_diagnostics, nested.diagnostics);
+        let namespace = format!("ddn-layer-ref-{}", item.element.id.0);
+        let namespaced_svg = namespace_svg_ids(&nested.svg, &namespace);
         let fragment = render_reference_fragment(
             item.element,
             target.page_index,
             target.layer_index,
             target.page_width_mm,
             target.page_height_mm,
-            &nested.svg,
+            &namespaced_svg,
         );
         if inject_fragment_in_plan_order(&mut output.svg, plan, index, &fragment) {
             rendered.push(item.element.id);
@@ -276,6 +278,45 @@ fn svg_inner(svg: &str) -> Option<&str> {
     let start = svg.find('>')? + 1;
     let end = svg.rfind("</svg>")?;
     (start <= end).then_some(&svg[start..end])
+}
+
+fn namespace_svg_ids(svg: &str, namespace: &str) -> String {
+    let mut ids = Vec::new();
+    let mut rest = svg;
+    const NEEDLE: &str = " id=\"";
+    while let Some(offset) = rest.find(NEEDLE) {
+        let value = &rest[offset + NEEDLE.len()..];
+        let Some(end) = value.find('"') else {
+            break;
+        };
+        let id = &value[..end];
+        if !id.is_empty() && !ids.iter().any(|existing| existing == id) {
+            ids.push(id.to_owned());
+        }
+        rest = &value[end + 1..];
+    }
+
+    let mut namespaced = svg.to_owned();
+    for id in ids {
+        let replacement = format!("{namespace}-{id}");
+        namespaced = namespaced.replace(
+            &format!(" id=\"{id}\""),
+            &format!(" id=\"{replacement}\""),
+        );
+        namespaced = namespaced.replace(
+            &format!("url(#{id})"),
+            &format!("url(#{replacement})"),
+        );
+        namespaced = namespaced.replace(
+            &format!("href=\"#{id}\""),
+            &format!("href=\"#{replacement}\""),
+        );
+        namespaced = namespaced.replace(
+            &format!("xlink:href=\"#{id}\""),
+            &format!("xlink:href=\"#{replacement}\""),
+        );
+    }
+    namespaced
 }
 
 fn append_unique_diagnostics(target: &mut Vec<SvgDiagnostic>, source: Vec<SvgDiagnostic>) {
