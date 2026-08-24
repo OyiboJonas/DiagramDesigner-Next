@@ -21,6 +21,23 @@ jobs:
         with:
           toolchain: 1.85.0
           components: rustfmt
+      - name: Allow sequential repeated clear/dispose anchors
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/prepare-connector-drawing.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''    if text.count(old) != 1:
+              raise SystemExit(f"Expected one anchor in {path}, found {text.count(old)}: {old[:120]!r}")
+          '''
+          new = '''    if old not in text:
+              raise SystemExit(f"Anchor not found in {path}: {old[:120]!r}")
+          '''
+          if old not in text:
+              raise SystemExit("replace_once helper anchor was not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
       - name: Apply connector drawing slice
         run: python scripts/prepare-connector-drawing.py
       - name: Format desktop Rust
