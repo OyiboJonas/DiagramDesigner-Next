@@ -1,3 +1,4 @@
+# Temporary self-removing helper for the Phase-2 image-assets branch.
 name: Branch image-assets integration helper
 
 on:
