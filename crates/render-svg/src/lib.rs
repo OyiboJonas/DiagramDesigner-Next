@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use next_domain::{
-    Color, Document, Element, ElementId, ElementKind, ElementStyle, FillStyle, GradientAxis,
-    LineStyle, MarkerStyle, PageId, Rect, RichTextToken, ScriptPosition, StyleId,
+    AssetId, Color, Document, Element, ElementId, ElementKind, ElementStyle, FillStyle,
+    GradientAxis, LineStyle, MarkerStyle, PageId, Rect, RichTextToken, ScriptPosition, StyleId,
     TextHorizontalAlignment, TextStyle, TextVerticalAlignment,
 };
 use render_plan::{RenderPlan, RenderPrimitiveFamily};
@@ -19,6 +19,18 @@ pub struct SvgRenderOptions {
     pub view_box_mm: Option<Rect>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RasterAssetIssue {
+    InvalidDimensions,
+    SizeOverflow,
+    UnsupportedBitsPerPixel { bits_per_pixel: u8 },
+    MissingPalette,
+    InvalidPaletteLength { expected: usize, actual: usize },
+    InvalidPixelLength { expected: usize, actual: usize },
+    InvalidAlphaLength { expected: usize, actual: usize },
+    EncodingFailed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SvgDiagnostic {
     UnsupportedPrimitive {
@@ -30,6 +42,19 @@ pub enum SvgDiagnostic {
     },
     InvalidGeometry {
         element_id: ElementId,
+    },
+    MissingAsset {
+        element_id: ElementId,
+        asset_id: AssetId,
+    },
+    UnsupportedAssetPayload {
+        element_id: ElementId,
+        asset_id: AssetId,
+    },
+    InvalidRasterAsset {
+        element_id: ElementId,
+        asset_id: AssetId,
+        issue: RasterAssetIssue,
     },
     SystemPaletteFallback {
         element_id: ElementId,

@@ -9,6 +9,7 @@ rust-version.workspace = true
 path = "src/public.rs"
 
 [dependencies]
+flate2.workspace = true
 next-domain = { path = "../next-domain" }
 render-plan = { path = "../render-plan" }
 thiserror.workspace = true
