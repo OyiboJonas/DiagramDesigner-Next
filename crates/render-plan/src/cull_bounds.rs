@@ -1,5 +1,7 @@
 use next_domain::{Element, ElementKind, MarkerStyle, Rect};
 
+use super::rotated_aabb;
+
 const PT_TO_MM: f64 = 25.4 / 72.0;
 
 /// Conservative renderer-independent culling bounds for one planned element.
@@ -87,26 +89,6 @@ fn expand_rect(rect: Rect, margin: f64) -> Rect {
         y: rect.y - margin,
         width: rect.width + margin * 2.0,
         height: rect.height + margin * 2.0,
-    }
-}
-
-fn rotated_aabb(rect: Rect, rotation_deg: f64) -> Rect {
-    if rotation_deg == 0.0 {
-        return rect;
-    }
-
-    let radians = rotation_deg.to_radians();
-    let cos = radians.cos().abs();
-    let sin = radians.sin().abs();
-    let width = rect.width * cos + rect.height * sin;
-    let height = rect.width * sin + rect.height * cos;
-    let center_x = rect.x + rect.width / 2.0;
-    let center_y = rect.y + rect.height / 2.0;
-    Rect {
-        x: center_x - width / 2.0,
-        y: center_y - height / 2.0,
-        width,
-        height,
     }
 }
 
