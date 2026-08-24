@@ -21,6 +21,7 @@ pub(super) fn apply_layer_references(
         return Ok(());
     };
     let mut rendered = Vec::new();
+    let mut nested_diagnostics = Vec::new();
 
     // Walk backwards so a later layer-reference fragment is already materialized
     // when an earlier one needs it as its z-order insertion anchor.
@@ -57,17 +58,18 @@ pub(super) fn apply_layer_references(
 
         let target_plan = plan_layer(target.layer);
         recursion_stack.push(item.element.id);
-        let nested = render_plan_to_svg_with_context(
+        let nested_result = render_plan_to_svg_with_context(
             document,
             target.page_id,
             &target_plan,
             SvgRenderOptions::default(),
             renditions,
             recursion_stack,
-        )?;
+        );
         recursion_stack.pop();
+        let nested = nested_result?;
 
-        append_unique_diagnostics(&mut output.diagnostics, nested.diagnostics);
+        append_unique_diagnostics(&mut nested_diagnostics, nested.diagnostics);
         let fragment = render_reference_fragment(
             item.element,
             target.page_index,
@@ -82,9 +84,13 @@ pub(super) fn apply_layer_references(
     }
 
     if rendered.is_empty() {
+        append_unique_diagnostics(&mut output.diagnostics, nested_diagnostics);
         return Ok(());
     }
 
+    // Remove only the selected core's top-level unsupported diagnostic for
+    // references that were actually materialized. Nested diagnostics are appended
+    // afterwards so a recursive re-entry of the same element ID stays explicit.
     output.diagnostics.retain(|diagnostic| {
         !matches!(
             diagnostic,
@@ -92,6 +98,7 @@ pub(super) fn apply_layer_references(
                 if rendered.contains(element_id)
         )
     });
+    append_unique_diagnostics(&mut output.diagnostics, nested_diagnostics);
     output.rendered_elements += rendered.len();
     output.skipped_elements = output.skipped_elements.saturating_sub(rendered.len());
     Ok(())
