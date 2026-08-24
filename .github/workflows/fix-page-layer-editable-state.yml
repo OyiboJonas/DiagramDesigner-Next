@@ -1,0 +1,43 @@
+name: Fix page layer editable state
+
+on:
+  pull_request:
+    branches: [main]
+    types: [synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.head_ref == 'desktop-page-layer-management'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-page-layer-management
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Apply editable-state fix
+        run: python scripts/fix-page-layer-editable-state.py
+      - name: Format desktop Rust
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Verify desktop JavaScript
+        run: node --check apps/desktop/ui/app.js
+      - name: Verify patch
+        run: git diff --check
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm scripts/fix-page-layer-editable-state.py
+          rm .github/workflows/fix-page-layer-editable-state.yml
+          git config user.name "DiagramDesigner Next automation"
+          git config user.email "190651966+OyiboJonas@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Desktop: keep page-layer editability coherent"
+          git push origin HEAD:desktop-page-layer-management
