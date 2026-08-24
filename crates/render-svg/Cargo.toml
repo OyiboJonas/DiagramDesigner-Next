@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-path = "src/public.rs"
+path = "src/phase2.rs"
 
 [dependencies]
 flate2.workspace = true
