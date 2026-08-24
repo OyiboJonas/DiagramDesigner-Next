@@ -66,10 +66,7 @@ pub(super) fn apply_polygons(
     output.skipped_elements = output.skipped_elements.saturating_sub(supported.len());
 }
 
-fn polygon_geometry_is_valid(
-    element: &Element,
-    vertices: &[next_domain::NormalizedPoint],
-) -> bool {
+fn polygon_geometry_is_valid(element: &Element, vertices: &[next_domain::NormalizedPoint]) -> bool {
     element.bounds_mm.x.is_finite()
         && element.bounds_mm.y.is_finite()
         && element.bounds_mm.width.is_finite()
@@ -122,13 +119,7 @@ fn render_polygon(
         element.id.0, points
     );
     write_stroke(&mut result, element.id, style, diagnostics);
-    write_fill(
-        &mut result,
-        defs,
-        element.id,
-        style,
-        diagnostics,
-    );
+    write_fill(&mut result, defs, element.id, style, diagnostics);
     result.push_str(&rotation_attribute(element));
     result.push_str("/>");
     result
