@@ -1,0 +1,48 @@
+name: Prepare connector drawing
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.head_ref == 'desktop-connector-drawing'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-connector-drawing
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Apply connector drawing slice
+        run: python scripts/prepare-connector-drawing.py
+      - name: Format desktop Rust
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Verify connector interaction tests
+        run: node --test web/editor-interaction/connector-gesture.test.mjs
+      - name: Verify desktop JavaScript
+        run: |
+          node --check apps/desktop/ui/app.js
+          node --check apps/desktop/ui/candidate-svg-surface.mjs
+          node --check apps/desktop/ui/editor-interaction/connector-gesture.mjs
+      - name: Verify patch
+        run: git diff --check
+      - name: Commit prepared implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm scripts/prepare-connector-drawing.py
+          rm .github/workflows/prepare-connector-drawing.yml
+          git config user.name "DiagramDesigner Next automation"
+          git config user.email "190651966+OyiboJonas@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Desktop: draw straight and orthogonal connectors"
+          git push origin HEAD:desktop-connector-drawing
