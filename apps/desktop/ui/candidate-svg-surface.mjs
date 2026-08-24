@@ -1,4 +1,10 @@
 import {
+  ConnectorGestureController,
+  bindConnectorPointerSurface,
+  buildOrthogonalPreviewPoints,
+  normalizeConnectorKind,
+} from "./editor-interaction/connector-gesture.mjs";
+import {
   MoveGestureController,
   bindMovePointerSurface,
 } from "./editor-interaction/move-gesture.mjs";
@@ -10,6 +16,7 @@ const MOVING_SOURCE_ATTRIBUTE = "data-ddn-moving-source";
 const SELECTED_ATTRIBUTE = "data-ddn-selected";
 const SNAP_GUIDES_ATTRIBUTE = "data-ddn-snap-guides";
 const SNAP_GUIDE_ATTRIBUTE = "data-ddn-snap-guide";
+const CONNECTOR_PREVIEW_ATTRIBUTE = "data-ddn-connector-preview";
 const FORBIDDEN_SVG_SELECTOR = "script, foreignObject, iframe, object, embed";
 const DEFAULT_INTERACTION_SETTINGS = Object.freeze({
   snappingEnabled: true,
@@ -32,6 +39,7 @@ export function createCandidateSvgSurface(
   host,
   {
     commitMove,
+    commitConnector = () => {},
     onError = (error) => {
       throw error;
     },
@@ -44,12 +52,17 @@ export function createCandidateSvgSurface(
   if (typeof commitMove !== "function") {
     throw new TypeError("commitMove must be a function");
   }
+  if (typeof commitConnector !== "function") {
+    throw new TypeError("commitConnector must be a function");
+  }
   if (typeof onError !== "function" || typeof onSelectionChange !== "function") {
     throw new TypeError("candidate SVG callbacks must be functions");
   }
 
   let svg = null;
   let disposePointerBinding = null;
+  let connectorController = null;
+  let connectorTool = null;
   let selectedElementIds = [];
   let presentationGeometry = null;
   let interactionSettings = { ...DEFAULT_INTERACTION_SETTINGS };
@@ -155,25 +168,34 @@ export function createCandidateSvgSurface(
       return;
     }
 
-    const controller = new MoveGestureController({
-      screenToDocument: ({ xPx, yPx }) => {
-        const rect = svg.getBoundingClientRect();
-        const viewBox = svg.viewBox?.baseVal;
-        if (!viewBox) {
-          throw new Error("candidate SVG does not expose a viewBox");
-        }
-        return mapClientPointToViewBox(
-          rect,
-          { x: viewBox.x, y: viewBox.y, width: viewBox.width, height: viewBox.height },
-          { xPx, yPx },
-        );
-      },
+    const screenToDocument = ({ xPx, yPx }) => {
+      const rect = svg.getBoundingClientRect();
+      const viewBox = svg.viewBox?.baseVal;
+      if (!viewBox) {
+        throw new Error("candidate SVG does not expose a viewBox");
+      }
+      return mapClientPointToViewBox(
+        rect,
+        { x: viewBox.x, y: viewBox.y, width: viewBox.width, height: viewBox.height },
+        { xPx, yPx },
+      );
+    };
+
+    const moveController = new MoveGestureController({
+      screenToDocument,
       transformDelta: transformMoveDelta,
     });
+    connectorController = new ConnectorGestureController({
+      screenToDocument,
+      minimumLengthMm: 0.5,
+    });
 
-    disposePointerBinding = bindMovePointerSurface(svg, {
-      controller,
+    const disposeMove = bindMovePointerSurface(svg, {
+      controller: moveController,
       resolveElementIds: (event) => {
+        if (connectorTool !== null) {
+          return null;
+        }
         const target = event.target?.closest?.("[data-element-id]");
         if (!target || !svg.contains(target) || target.closest(`[${MOVE_OVERLAY_ATTRIBUTE}]`)) {
           clearSelection();
@@ -188,9 +210,7 @@ export function createCandidateSvgSurface(
       },
       onOverlay: applyMovePreview,
       onCommit: (commit) => {
-        // bindMovePointerSurface clears its transient overlay before publishing the
-        // semantic commit. Reapply the final preview synchronously so the shape
-        // does not visually snap back while the single Rust command is in flight.
+        // Preserve the final preview while the single Rust move command is in flight.
         applyMovePreview(commit);
         Promise.resolve(commitMove(commit)).catch((error) => {
           removeMoveOverlay(svg);
@@ -200,6 +220,26 @@ export function createCandidateSvgSurface(
       },
       onError,
     });
+
+    const disposeConnector = bindConnectorPointerSurface(svg, {
+      controller: connectorController,
+      getConnectorKind: () => connectorTool,
+      onOverlay: (preview) => renderConnectorPreview(svg, preview),
+      onCommit: (commit) => {
+        renderConnectorPreview(svg, { ...commit, kind: "connector-preview" });
+        Promise.resolve(commitConnector(commit)).catch((error) => {
+          removeConnectorPreview(svg);
+          onError(error);
+        });
+      },
+      onError,
+    });
+
+    disposePointerBinding = () => {
+      disposeConnector();
+      disposeMove();
+      connectorController = null;
+    };
   };
 
   return Object.freeze({
@@ -209,6 +249,8 @@ export function createCandidateSvgSurface(
       disposePointerBinding = null;
       removeMoveOverlay(svg);
       removeSnapGuides(svg);
+      removeConnectorPreview(svg);
+      connectorController = null;
       clearSelection({ notify: false });
       host.replaceChildren();
       svg = null;
@@ -254,6 +296,21 @@ export function createCandidateSvgSurface(
       applySelection(previousSelection, { notify: false });
     },
 
+    setConnectorTool(kind) {
+      const next = kind === null ? null : normalizeConnectorKind(kind);
+      if (connectorController?.isActive) {
+        connectorController.cancel();
+      }
+      removeConnectorPreview(svg);
+      connectorTool = next;
+      if (next === null) {
+        host.removeAttribute("data-connector-tool");
+      } else {
+        host.setAttribute("data-connector-tool", next);
+      }
+      return connectorTool;
+    },
+
     setInteractionSettings(settings) {
       interactionSettings = normalizeInteractionSettings(interactionSettings, settings);
       applyGridStyle(host, presentationGeometry, interactionSettings);
@@ -274,6 +331,8 @@ export function createCandidateSvgSurface(
       disposePointerBinding = null;
       removeMoveOverlay(svg);
       removeSnapGuides(svg);
+      removeConnectorPreview(svg);
+      connectorController = null;
       clearSelection();
       host.replaceChildren();
       svg = null;
@@ -286,6 +345,10 @@ export function createCandidateSvgSurface(
       removeSnapGuides(svg);
     },
 
+    clearConnectorPreview() {
+      removeConnectorPreview(svg);
+    },
+
     get selectedElementIds() {
       return Object.freeze([...selectedElementIds]);
     },
@@ -295,6 +358,8 @@ export function createCandidateSvgSurface(
       disposePointerBinding = null;
       removeMoveOverlay(svg);
       removeSnapGuides(svg);
+      removeConnectorPreview(svg);
+      connectorController = null;
       clearSelection();
       host.replaceChildren();
       svg = null;
@@ -358,6 +423,44 @@ function removeMoveOverlay(svg) {
   for (const source of svg.querySelectorAll(`[${MOVING_SOURCE_ATTRIBUTE}]`)) {
     source.removeAttribute(MOVING_SOURCE_ATTRIBUTE);
   }
+}
+
+function removeConnectorPreview(svg) {
+  if (!svg) {
+    return;
+  }
+  for (const preview of svg.querySelectorAll(`[${CONNECTOR_PREVIEW_ATTRIBUTE}]`)) {
+    preview.remove();
+  }
+}
+
+function renderConnectorPreview(svg, preview) {
+  removeConnectorPreview(svg);
+  if (!svg || preview?.kind !== "connector-preview") {
+    return;
+  }
+  const start = preview.startMm;
+  const end = preview.endMm;
+  const element =
+    preview.connectorKind === "orthogonal"
+      ? document.createElementNS(SVG_NS, "polyline")
+      : document.createElementNS(SVG_NS, "line");
+  element.setAttribute(CONNECTOR_PREVIEW_ATTRIBUTE, preview.connectorKind);
+  element.setAttribute("pointer-events", "none");
+  element.setAttribute("aria-hidden", "true");
+  if (preview.connectorKind === "orthogonal") {
+    const points = buildOrthogonalPreviewPoints(start, end);
+    element.setAttribute(
+      "points",
+      points.map((point) => `${formatFinite(point.x)},${formatFinite(point.y)}`).join(" "),
+    );
+  } else {
+    element.setAttribute("x1", formatFinite(start?.x));
+    element.setAttribute("y1", formatFinite(start?.y));
+    element.setAttribute("x2", formatFinite(end?.x));
+    element.setAttribute("y2", formatFinite(end?.y));
+  }
+  svg.append(element);
 }
 
 function removeSnapGuides(svg) {

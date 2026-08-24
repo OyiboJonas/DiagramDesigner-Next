@@ -14,6 +14,8 @@ const elements = {
   toggleSnap: document.querySelector('#toggle-snap'),
   addRectangle: document.querySelector('#add-rectangle'),
   addText: document.querySelector('#add-text'),
+  drawStraightConnector: document.querySelector('#draw-straight-connector'),
+  drawOrthogonalConnector: document.querySelector('#draw-orthogonal-connector'),
   deleteSelection: document.querySelector('#delete-selection'),
   rendererBenchmark: document.querySelector('#renderer-benchmark'),
   documentName: document.querySelector('#document-name'),
@@ -48,6 +50,7 @@ const elements = {
   propertyWidth: document.querySelector('#property-width'),
   propertyHeight: document.querySelector('#property-height'),
   propertyRotation: document.querySelector('#property-rotation'),
+  propertyGeometryNote: document.querySelector('#property-geometry-note'),
   propertyTextField: document.querySelector('#property-text-field'),
   propertyText: document.querySelector('#property-text'),
   propertyTextNote: document.querySelector('#property-text-note'),
@@ -69,6 +72,8 @@ const actionButtons = [
   elements.redo,
   elements.addRectangle,
   elements.addText,
+  elements.drawStraightConnector,
+  elements.drawOrthogonalConnector,
   elements.deleteSelection,
   elements.applyProperties,
   elements.addPage,
@@ -92,11 +97,13 @@ let presentationRequestSequence = 0;
 let currentPresentation = null;
 let currentSelectionProperties = null;
 let currentNavigation = null;
+let connectorTool = null;
 let isBusy = false;
 let keyboardSurface = null;
 
 const svgSurface = createSvgSurface(elements.canvasPage, {
   commitMove: commitSvgMove,
+  commitConnector: commitSvgConnector,
   onSelectionChange: (elementIds) => {
     keyboardSurface?.syncSelectionState(elementIds);
     void syncSelection(elementIds);
@@ -181,12 +188,23 @@ function updateStructureDisabledState() {
   const layerEditable = Boolean(activeLayer?.visible && !activeLayer?.locked);
   elements.addRectangle.disabled = isBusy || !layerEditable;
   elements.addText.disabled = isBusy || !layerEditable;
+  elements.drawStraightConnector.disabled = isBusy || !layerEditable;
+  elements.drawOrthogonalConnector.disabled = isBusy || !layerEditable;
+  if (!layerEditable && connectorTool !== null) {
+    setConnectorTool(null, { announce: false, clearSelection: false });
+  }
   elements.addRectangle.title = layerEditable
     ? 'Create a rectangle on the active layer'
     : 'Choose a visible, unlocked layer to create elements';
   elements.addText.title = layerEditable
     ? 'Create a text box on the active layer'
     : 'Choose a visible, unlocked layer to create elements';
+  elements.drawStraightConnector.title = layerEditable
+    ? 'Draw straight connectors'
+    : 'Choose a visible, unlocked layer to draw connectors';
+  elements.drawOrthogonalConnector.title = layerEditable
+    ? 'Draw orthogonal connectors'
+    : 'Choose a visible, unlocked layer to draw connectors';
   elements.applyPageProperties.disabled = isBusy || !activePage;
   elements.applyLayerProperties.disabled = isBusy || !activeLayer;
 }
@@ -298,6 +316,29 @@ function renderRulerAxis(host, ticks, lengthMm) {
 function renderInteractionButtons() {
   elements.toggleGrid.setAttribute('aria-pressed', String(interactionSettings.gridVisible));
   elements.toggleSnap.setAttribute('aria-pressed', String(interactionSettings.snappingEnabled));
+  elements.drawStraightConnector.setAttribute('aria-pressed', String(connectorTool === 'straight'));
+  elements.drawOrthogonalConnector.setAttribute('aria-pressed', String(connectorTool === 'orthogonal'));
+}
+
+function setConnectorTool(kind, { announce = true, clearSelection = true } = {}) {
+  if (kind !== null && kind !== 'straight' && kind !== 'orthogonal') {
+    throw new TypeError(`Unsupported connector tool: ${String(kind)}`);
+  }
+  connectorTool = kind;
+  svgSurface.setConnectorTool(kind);
+  if (kind !== null && clearSelection) {
+    clearLocalSelection();
+  }
+  renderInteractionButtons();
+  if (announce) {
+    setStatus(
+      kind === null
+        ? 'Selection tool active'
+        : kind === 'straight'
+          ? 'Straight connector tool — drag on the page; Escape exits'
+          : 'Orthogonal connector tool — drag on the page; Escape exits',
+    );
+  }
 }
 
 function applyInteractionSettings(message) {
@@ -362,7 +403,8 @@ function renderSelectionProperties(details) {
   elements.deleteSelection.disabled = count === 0;
 
   const primary = details?.primary ?? null;
-  elements.applyProperties.disabled = !primary;
+  elements.applyProperties.disabled =
+    !primary || (primary.geometryEditable === false && primary.textEditable !== true);
   if (!primary) {
     elements.selectionPropertiesForm.hidden = true;
     return;
@@ -376,6 +418,17 @@ function renderSelectionProperties(details) {
   elements.propertyWidth.value = String(primary.boundsMm.width);
   elements.propertyHeight.value = String(primary.boundsMm.height);
   elements.propertyRotation.value = String(primary.rotationDeg);
+  const geometryEditable = primary.geometryEditable !== false;
+  for (const input of [
+    elements.propertyX,
+    elements.propertyY,
+    elements.propertyWidth,
+    elements.propertyHeight,
+    elements.propertyRotation,
+  ]) {
+    input.disabled = !geometryEditable;
+  }
+  elements.propertyGeometryNote.hidden = geometryEditable;
 
   const hasText = primary.text !== null && primary.text !== undefined;
   elements.propertyTextField.hidden = !hasText;
@@ -501,6 +554,10 @@ async function applyElementProperties(event) {
   if (!invoke || !primary) {
     return;
   }
+  if (primary.geometryEditable === false) {
+    setStatus('This element uses a dedicated geometry tool and cannot be resized in the basic inspector');
+    return;
+  }
   const numbers = {
     x: Number(elements.propertyX.value),
     y: Number(elements.propertyY.value),
@@ -565,6 +622,40 @@ async function commitSvgMove(commit) {
   scheduleRecoverySync(250);
   setStatus('Move committed');
   return state;
+}
+
+async function commitSvgConnector(commit) {
+  if (!invoke) {
+    throw new Error('Tauri runtime not detected');
+  }
+  if (commit?.kind !== 'create-connector') {
+    throw new TypeError('SVG surface emitted an unsupported connector command');
+  }
+  const activeTool = connectorTool;
+  svgSurface.setConnectorTool(null);
+  setBusy(true);
+  try {
+    const result = await invoke('create_connector', {
+      request: {
+        kind: commit.connectorKind,
+        startMm: { ...commit.startMm },
+        endMm: { ...commit.endMm },
+      },
+    });
+    renderState(result.state);
+    await refreshPresentation({ preserveSelection: false });
+    svgSurface.setSelection(result.selectedElementIds ?? []);
+    keyboardSurface?.syncSelectionState(result.selectedElementIds ?? []);
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus(commit.connectorKind === 'straight' ? 'Straight connector created' : 'Orthogonal connector created');
+    return result.state;
+  } finally {
+    setBusy(false);
+    if (connectorTool === activeTool && activeTool !== null) {
+      svgSurface.setConnectorTool(activeTool);
+    }
+  }
 }
 
 async function syncRecovery() {
@@ -700,6 +791,7 @@ async function initializeDesktop() {
 }
 
 elements.newDocument.addEventListener('click', () => {
+  setConnectorTool(null, { announce: false });
   void runAction('new_document', undefined, () => 'New document created', {
     syncRecovery: true,
     refreshPresentation: true,
@@ -708,6 +800,7 @@ elements.newDocument.addEventListener('click', () => {
 });
 
 elements.openDocument.addEventListener('click', () => {
+  setConnectorTool(null, { announce: false });
   void runAction(
     'open_document',
     undefined,
@@ -828,6 +921,14 @@ elements.addText.addEventListener('click', () => {
   void createBasicElement('text');
 });
 
+elements.drawStraightConnector.addEventListener('click', () => {
+  setConnectorTool(connectorTool === 'straight' ? null : 'straight');
+});
+
+elements.drawOrthogonalConnector.addEventListener('click', () => {
+  setConnectorTool(connectorTool === 'orthogonal' ? null : 'orthogonal');
+});
+
 elements.deleteSelection.addEventListener('click', () => {
   void deleteCurrentSelection();
 });
@@ -897,6 +998,18 @@ elements.recoveryDialog.addEventListener('cancel', (event) => {
   // silently discard the only recovery snapshot.
   event.preventDefault();
 });
+
+window.addEventListener(
+  'keydown',
+  (event) => {
+    if (event.key === 'Escape' && connectorTool !== null && !elements.recoveryDialog.open) {
+      setConnectorTool(null);
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  },
+  true,
+);
 
 window.diagramDesignerNext = Object.freeze({
   scheduleRecoverySync,

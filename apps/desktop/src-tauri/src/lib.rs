@@ -12,10 +12,10 @@ use app_core::ApplicationSession;
 use ddnx::PackageLimits;
 use editor_runtime::RecoveryPlan;
 use next_domain::{
-    AnchorSet, ConnectorLabelStyle, Document, DocumentDefaults, DocumentId, Element, ElementId,
-    ElementKind, Layer, LayerId, NextArtifact, Page, PageId, Point, Rect, RichTextDocument,
-    RichTextToken, Scene, Size, TextBlock, TextHorizontalAlignment, TextLayout, TextStyle,
-    TextVerticalAlignment,
+    AnchorSet, Connector, ConnectorLabelStyle, Document, DocumentDefaults, DocumentId, Element,
+    ElementId, ElementKind, Endpoint, Layer, LayerId, LineStyle, MarkerStyle, NextArtifact, Page,
+    PageId, Point, Rect, RichTextDocument, RichTextToken, Scene, Size, TextBlock,
+    TextHorizontalAlignment, TextLayout, TextStyle, TextVerticalAlignment,
 };
 use platform_fs::{AtomicSaveError, CommitMode, DurabilityLevel, atomic_save};
 use render_plan::{RenderPlanOptions, build_page_plan};
@@ -214,6 +214,21 @@ struct CreateBasicElementRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ConnectorKind {
+    Straight,
+    Orthogonal,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateConnectorRequest {
+    kind: ConnectorKind,
+    start_mm: Point,
+    end_mm: Point,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateElementPropertiesRequest {
     element_id: ElementId,
@@ -246,6 +261,7 @@ struct ElementPropertiesDto {
     rotation_deg: f64,
     text: Option<String>,
     text_editable: bool,
+    geometry_editable: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -822,6 +838,121 @@ fn create_basic_element(
 }
 
 #[tauri::command]
+fn create_connector(
+    request: CreateConnectorRequest,
+    state: State<'_, DesktopState>,
+) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let (target, page_size) = {
+        let session = document.session.session();
+        let page_id = session.active_page_id().ok_or_else(|| {
+            CommandError::new("no_active_page", "The current document has no active page.")
+        })?;
+        let layer_id = document.session.active_page_layer_id().ok_or_else(|| {
+            CommandError::new(
+                "no_active_page_layer",
+                "Choose a page-local layer before drawing a connector.",
+            )
+        })?;
+        let page = session
+            .document()
+            .pages
+            .iter()
+            .find(|page| page.id == page_id)
+            .ok_or_else(|| {
+                CommandError::new("page_missing", "The active page no longer exists.")
+            })?;
+        let layer = page
+            .layers
+            .iter()
+            .find(|layer| layer.id == layer_id)
+            .ok_or_else(|| {
+                CommandError::new("layer_missing", "The active layer no longer exists.")
+            })?;
+        if !layer.visible {
+            return Err(CommandError::new(
+                "connector_layer_hidden",
+                "Connectors can be drawn only on a visible layer.",
+            ));
+        }
+        if layer.locked {
+            return Err(CommandError::new(
+                "connector_layer_locked",
+                "Unlock the active layer before drawing a connector.",
+            ));
+        }
+        let target = session.active_layer().ok_or_else(|| {
+            CommandError::new(
+                "no_active_layer",
+                "The current document has no active layer.",
+            )
+        })?;
+        (target, page.size_mm)
+    };
+
+    let start_mm = clamp_connector_point(request.start_mm, page_size)?;
+    let end_mm = clamp_connector_point(request.end_mm, page_size)?;
+    let distance_mm = (end_mm.x - start_mm.x).hypot(end_mm.y - start_mm.y);
+    if distance_mm < 0.5 {
+        return Err(CommandError::new(
+            "connector_too_short",
+            "Drag at least 0.5 mm to create a connector.",
+        ));
+    }
+
+    let element_id = ElementId::new();
+    let connector = Connector {
+        start: Endpoint {
+            position_mm: start_mm,
+            connection: None,
+        },
+        end: Endpoint {
+            position_mm: end_mm,
+            connection: None,
+        },
+        start_marker: MarkerStyle::None,
+        end_marker: MarkerStyle::None,
+        line_style: LineStyle::Solid,
+        secondary_color: None,
+    };
+    let (name, kind) = match request.kind {
+        ConnectorKind::Straight => (
+            "Connector".to_owned(),
+            ElementKind::StraightConnector { connector },
+        ),
+        ConnectorKind::Orthogonal => (
+            "Orthogonal connector".to_owned(),
+            ElementKind::OrthogonalConnector {
+                connector,
+                corner_radius_mm: 0.0,
+            },
+        ),
+    };
+    let element = Element {
+        id: element_id,
+        name,
+        bounds_mm: connector_bounds(start_mm, end_mm),
+        rotation_deg: 0.0,
+        anchors: AnchorSet::default(),
+        ports: Vec::new(),
+        style_id: None,
+        text: None,
+        kind,
+        import: None,
+    };
+
+    document
+        .session
+        .create_element(target, element, None)
+        .map_err(|error| CommandError::new("connector_create_failed", error.to_string()))?;
+    document
+        .session
+        .set_selection([element_id])
+        .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
+    Ok(element_edit_result_dto(&document))
+}
+
+#[tauri::command]
 fn delete_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultDto, CommandError> {
     let mut document = lock_document(&state)?;
     let selected: Vec<_> = document
@@ -847,6 +978,19 @@ fn update_element_properties(
     state: State<'_, DesktopState>,
 ) -> Result<ElementEditResultDto, CommandError> {
     let mut document = lock_document(&state)?;
+    let existing = find_element(document.session.session().document(), request.element_id)
+        .ok_or_else(|| {
+            CommandError::new(
+                "element_properties_missing",
+                "The selected element no longer exists in the current document.",
+            )
+        })?;
+    if !element_geometry_editable(&existing.kind) {
+        return Err(CommandError::new(
+            "element_geometry_requires_dedicated_tool",
+            "This element uses a dedicated geometry tool and cannot be resized in the basic inspector.",
+        ));
+    }
     let text_update = if let Some(text) = request.text {
         let existing = find_element(document.session.session().document(), request.element_id)
             .ok_or_else(|| {
@@ -1317,7 +1461,17 @@ fn element_properties_dto(element: &Element) -> ElementPropertiesDto {
         rotation_deg: element.rotation_deg,
         text,
         text_editable,
+        geometry_editable: element_geometry_editable(&element.kind),
     }
+}
+
+fn element_geometry_editable(kind: &ElementKind) -> bool {
+    !matches!(
+        kind,
+        ElementKind::StraightConnector { .. }
+            | ElementKind::OrthogonalConnector { .. }
+            | ElementKind::Group { .. }
+    )
 }
 
 fn element_type_name(kind: &ElementKind) -> &'static str {
@@ -1373,6 +1527,28 @@ fn text_preview(block: &TextBlock) -> (String, bool, Option<TextStyle>) {
         }
     }
     (preview, editable, common_style)
+}
+
+fn clamp_connector_point(point: Point, page_size: Size) -> Result<Point, CommandError> {
+    if !point.x.is_finite() || !point.y.is_finite() {
+        return Err(CommandError::new(
+            "invalid_connector_geometry",
+            "Connector endpoints must contain finite coordinates.",
+        ));
+    }
+    Ok(Point {
+        x: point.x.clamp(0.0, page_size.width),
+        y: point.y.clamp(0.0, page_size.height),
+    })
+}
+
+fn connector_bounds(start_mm: Point, end_mm: Point) -> Rect {
+    Rect {
+        x: start_mm.x.min(end_mm.x),
+        y: start_mm.y.min(end_mm.y),
+        width: (start_mm.x - end_mm.x).abs().max(0.1),
+        height: (start_mm.y - end_mm.y).abs().max(0.1),
+    }
 }
 
 fn simple_text_block(text: &str, style: TextStyle, layout: Option<TextLayout>) -> TextBlock {
@@ -1598,6 +1774,7 @@ pub fn run() {
             set_selection,
             selection_properties,
             create_basic_element,
+            create_connector,
             delete_selection,
             update_element_properties,
             new_document,

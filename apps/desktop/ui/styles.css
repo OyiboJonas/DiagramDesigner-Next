@@ -713,3 +713,17 @@ button.toggle-button[aria-pressed="true"] {
   min-height: auto;
   margin: 0;
 }
+
+.page-surface[data-connector-tool] .candidate-svg-document {
+  cursor: crosshair;
+}
+
+[data-ddn-connector-preview] {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 0.7;
+  stroke-dasharray: 2 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.92;
+}
