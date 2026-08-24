@@ -243,6 +243,7 @@ function renderSelectionProperties(details) {
   elements.deleteSelection.disabled = count === 0;
 
   const primary = details?.primary ?? null;
+  elements.applyProperties.disabled = !primary;
   if (!primary) {
     elements.selectionPropertiesForm.hidden = true;
     return;
