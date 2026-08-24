@@ -2,9 +2,7 @@ use std::f32::consts::FRAC_PI_2;
 
 use legacy_ddd::{
     LegacyDecoded, LegacyFormat,
-    object::{
-        LegacyBaseObject, LegacyObject, LegacyPicturePayload, LegacyRect, LegacyTextPayload,
-    },
+    object::{LegacyBaseObject, LegacyObject, LegacyPicturePayload, LegacyRect, LegacyTextPayload},
     template::LegacyTemplate,
 };
 use legacy_migrate::{MigrationOptions, migrate_decoded};
