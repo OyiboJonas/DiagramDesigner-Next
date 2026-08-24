@@ -23,6 +23,8 @@ jobs:
           components: rustfmt
       - name: Apply page/layer editor slice
         run: python scripts/prepare-page-layer-management.py
+      - name: Apply locked-layer semantics fix
+        run: python scripts/fix-page-layer-management.py
       - name: Format application core
         run: cargo fmt --manifest-path crates/app-core/Cargo.toml
       - name: Format desktop Rust
@@ -38,6 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           rm scripts/prepare-page-layer-management.py
+          rm scripts/fix-page-layer-management.py
           rm .github/workflows/prepare-page-layer-management.yml
           rm -f crates/app-core/Cargo.lock
           git config user.name "DiagramDesigner Next automation"
