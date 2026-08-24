@@ -63,7 +63,7 @@ pub fn render_plan_to_svg_with_metafile_renditions(
     )
 }
 
-pub(super) fn render_plan_to_svg_with_context(
+fn render_plan_to_svg_with_context(
     document: &Document,
     page_id: PageId,
     plan: &RenderPlan<'_>,
