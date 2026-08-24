@@ -441,15 +441,11 @@ fn legacy_point(points: &[Point], index: usize) -> Option<Point> {
             3 => Some(midpoint(points[1], points[2])),
             _ => points.get(index / 2).copied(),
         },
-        4 => {
-            if index < 2 {
-                points.get(index).copied()
-            } else if index > 2 {
-                points.get(index - 1).copied()
-            } else {
-                Some(midpoint(points[1], points[2]))
-            }
-        }
+        4 => match index {
+            0 | 1 => points.get(index).copied(),
+            2 => Some(midpoint(points[1], points[2])),
+            _ => points.get(index - 1).copied(),
+        },
         _ => points.get(index).copied(),
     }
 }
