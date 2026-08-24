@@ -1,0 +1,67 @@
+name: Windows desktop preview
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-preview:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'desktop-windows-preview-build'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout PR head
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Checkout dispatched ref
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+      - name: Build release executable
+        shell: powershell
+        run: |
+          cargo build --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows preview release build failed."
+          }
+      - name: Assemble preview artifact
+        shell: powershell
+        run: |
+          $source = "apps/desktop/src-tauri/target/release/diagram-designer-next-desktop.exe"
+          if (-not (Test-Path $source -PathType Leaf)) {
+            throw "Preview executable was not produced at $source"
+          }
+          $size = (Get-Item $source).Length
+          if ($size -le 0) {
+            throw "Preview executable is empty."
+          }
+          New-Item -ItemType Directory -Force -Path dist/windows-preview | Out-Null
+          Copy-Item $source "dist/windows-preview/DiagramDesigner-Next-Preview.exe"
+          Copy-Item "docs/testing/windows-preview.md" "dist/windows-preview/TESTING.md"
+          $commit = (git rev-parse HEAD).Trim()
+          $lockBlob = (git rev-parse HEAD:apps/desktop/src-tauri/Cargo.lock).Trim()
+          @(
+            "DiagramDesigner Next Windows Preview",
+            "source_commit=$commit",
+            "desktop_cargo_lock_blob=$lockBlob",
+            "executable_bytes=$size",
+            "rust_toolchain=1.85.0",
+            "signed=false",
+            "installer=false"
+          ) | Set-Content -Encoding UTF8 "dist/windows-preview/BUILD.txt"
+      - name: Upload Windows preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: DiagramDesigner-Next-Windows-Preview
+          path: dist/windows-preview
+          if-no-files-found: error
+          retention-days: 14
