@@ -551,3 +551,70 @@ button.toggle-button[aria-pressed="true"] {
     width: 100%;
   }
 }
+
+
+.selection-inspector {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.selection-inspector-heading,
+.selection-identity {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.selection-inspector h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+#selection-summary,
+#selection-type,
+.property-note {
+  font-size: 0.78rem;
+  opacity: 0.72;
+}
+
+#selection-properties-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+#selection-properties-form[hidden] {
+  display: none;
+}
+
+.property-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.property-grid label,
+.property-field {
+  display: grid;
+  gap: 4px;
+  font-size: 0.78rem;
+}
+
+.property-grid input,
+.property-field input,
+.property-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+.property-field textarea {
+  resize: vertical;
+}
+
+.property-note {
+  margin: 0;
+  line-height: 1.35;
+}

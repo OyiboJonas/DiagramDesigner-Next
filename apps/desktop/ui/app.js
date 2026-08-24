@@ -12,6 +12,9 @@ const elements = {
   redo: document.querySelector('#redo'),
   toggleGrid: document.querySelector('#toggle-grid'),
   toggleSnap: document.querySelector('#toggle-snap'),
+  addRectangle: document.querySelector('#add-rectangle'),
+  addText: document.querySelector('#add-text'),
+  deleteSelection: document.querySelector('#delete-selection'),
   rendererBenchmark: document.querySelector('#renderer-benchmark'),
   documentName: document.querySelector('#document-name'),
   documentPath: document.querySelector('#document-path'),
@@ -19,6 +22,19 @@ const elements = {
   pageCount: document.querySelector('#page-count'),
   historyState: document.querySelector('#history-state'),
   rendererStats: document.querySelector('#renderer-stats'),
+  selectionSummary: document.querySelector('#selection-summary'),
+  selectionPropertiesForm: document.querySelector('#selection-properties-form'),
+  selectionName: document.querySelector('#selection-name'),
+  selectionType: document.querySelector('#selection-type'),
+  propertyX: document.querySelector('#property-x'),
+  propertyY: document.querySelector('#property-y'),
+  propertyWidth: document.querySelector('#property-width'),
+  propertyHeight: document.querySelector('#property-height'),
+  propertyRotation: document.querySelector('#property-rotation'),
+  propertyTextField: document.querySelector('#property-text-field'),
+  propertyText: document.querySelector('#property-text'),
+  propertyTextNote: document.querySelector('#property-text-note'),
+  applyProperties: document.querySelector('#apply-properties'),
   rulerX: document.querySelector('#ruler-x'),
   rulerY: document.querySelector('#ruler-y'),
   canvasPage: document.querySelector('#canvas-page'),
@@ -34,6 +50,10 @@ const actionButtons = [
   elements.saveDocument,
   elements.undo,
   elements.redo,
+  elements.addRectangle,
+  elements.addText,
+  elements.deleteSelection,
+  elements.applyProperties,
   elements.rendererBenchmark,
 ];
 
@@ -47,13 +67,14 @@ const interactionSettings = {
 let recoveryTimer = null;
 let presentationRequestSequence = 0;
 let currentPresentation = null;
+let currentSelectionProperties = null;
 let keyboardSurface = null;
 
 const svgSurface = createSvgSurface(elements.canvasPage, {
   commitMove: commitSvgMove,
   onSelectionChange: (elementIds) => {
     keyboardSurface?.syncSelectionState(elementIds);
-    syncSelection(elementIds);
+    void syncSelection(elementIds);
   },
   onError: (error) => {
     setStatus(formatInvokeError(error));
@@ -71,6 +92,11 @@ renderInteractionButtons();
 function setBusy(busy) {
   for (const button of actionButtons) {
     button.disabled = busy;
+  }
+  if (!busy) {
+    const selectionCount = Number(currentSelectionProperties?.count ?? 0);
+    elements.deleteSelection.disabled = selectionCount === 0;
+    elements.applyProperties.disabled = !currentSelectionProperties?.primary;
   }
 }
 
@@ -194,6 +220,7 @@ async function refreshPresentation({ preserveSelection = true } = {}) {
     keyboardSurface?.refresh({ restoreFocus: restoreKeyboardFocus });
     renderPresentationStats(presentation);
     renderRulers(presentation);
+    await refreshSelectionProperties();
     return presentation;
   } catch (error) {
     if (requestSequence === presentationRequestSequence) {
@@ -208,15 +235,161 @@ async function refreshPresentation({ preserveSelection = true } = {}) {
   }
 }
 
-function syncSelection(elementIds) {
+function renderSelectionProperties(details) {
+  currentSelectionProperties = details;
+  const count = Number(details?.count ?? 0);
+  elements.selectionSummary.textContent =
+    count === 0 ? 'No selection' : count === 1 ? '1 element' : `${count} elements`;
+  elements.deleteSelection.disabled = count === 0;
+
+  const primary = details?.primary ?? null;
+  elements.applyProperties.disabled = !primary;
+  if (!primary) {
+    elements.selectionPropertiesForm.hidden = true;
+    return;
+  }
+
+  elements.selectionPropertiesForm.hidden = false;
+  elements.selectionName.textContent = primary.name;
+  elements.selectionType.textContent = primary.elementType;
+  elements.propertyX.value = String(primary.boundsMm.x);
+  elements.propertyY.value = String(primary.boundsMm.y);
+  elements.propertyWidth.value = String(primary.boundsMm.width);
+  elements.propertyHeight.value = String(primary.boundsMm.height);
+  elements.propertyRotation.value = String(primary.rotationDeg);
+
+  const hasText = primary.text !== null && primary.text !== undefined;
+  elements.propertyTextField.hidden = !hasText;
+  elements.propertyTextNote.hidden = !hasText || primary.textEditable;
+  if (hasText) {
+    elements.propertyText.value = primary.text;
+    elements.propertyText.disabled = !primary.textEditable;
+    if (!primary.textEditable) {
+      elements.propertyTextNote.textContent =
+        'Rich text is shown for reference; this basic editor will not flatten mixed formatting or dynamic fields.';
+    }
+  }
+}
+
+async function refreshSelectionProperties() {
+  if (!invoke) {
+    return null;
+  }
+  try {
+    const details = await invoke('selection_properties');
+    renderSelectionProperties(details);
+    return details;
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+    return null;
+  }
+}
+
+async function syncSelection(elementIds) {
   if (!invoke) {
     return;
   }
-  void invoke('set_selection', {
-    request: { elementIds: [...elementIds] },
-  }).catch((error) => {
+  try {
+    await invoke('set_selection', {
+      request: { elementIds: [...elementIds] },
+    });
+    await refreshSelectionProperties();
+  } catch (error) {
     setStatus(formatInvokeError(error));
-  });
+  }
+}
+
+async function createBasicElement(kind) {
+  if (!invoke) {
+    return;
+  }
+  setBusy(true);
+  try {
+    const result = await invoke('create_basic_element', { request: { kind } });
+    renderState(result.state);
+    await refreshPresentation({ preserveSelection: false });
+    svgSurface.setSelection(result.selectedElementIds ?? []);
+    keyboardSurface?.syncSelectionState(result.selectedElementIds ?? []);
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus(kind === 'text' ? 'Text box created' : 'Rectangle created');
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function deleteCurrentSelection() {
+  if (!invoke) {
+    return;
+  }
+  setBusy(true);
+  try {
+    const result = await invoke('delete_selection');
+    renderState(result.state);
+    svgSurface.setSelection([]);
+    keyboardSurface?.syncSelectionState([]);
+    await refreshPresentation({ preserveSelection: false });
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus('Selection deleted');
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function applyElementProperties(event) {
+  event.preventDefault();
+  const primary = currentSelectionProperties?.primary;
+  if (!invoke || !primary) {
+    return;
+  }
+  const numbers = {
+    x: Number(elements.propertyX.value),
+    y: Number(elements.propertyY.value),
+    width: Number(elements.propertyWidth.value),
+    height: Number(elements.propertyHeight.value),
+    rotation: Number(elements.propertyRotation.value),
+  };
+  if (
+    !Object.values(numbers).every(Number.isFinite) ||
+    numbers.width <= 0 ||
+    numbers.height <= 0
+  ) {
+    setStatus('Bounds must be finite and width/height must be greater than zero');
+    return;
+  }
+
+  const request = {
+    elementId: primary.elementId,
+    boundsMm: {
+      x: numbers.x,
+      y: numbers.y,
+      width: numbers.width,
+      height: numbers.height,
+    },
+    rotationDeg: numbers.rotation,
+  };
+  if (primary.textEditable) {
+    request.text = elements.propertyText.value;
+  }
+
+  setBusy(true);
+  try {
+    const result = await invoke('update_element_properties', { request });
+    renderState(result.state);
+    await refreshPresentation({ preserveSelection: true });
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus('Element properties updated');
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function commitSvgMove(commit) {
@@ -394,6 +567,22 @@ elements.openDocument.addEventListener('click', () => {
       preserveSelection: false,
     },
   );
+});
+
+elements.addRectangle.addEventListener('click', () => {
+  void createBasicElement('rectangle');
+});
+
+elements.addText.addEventListener('click', () => {
+  void createBasicElement('text');
+});
+
+elements.deleteSelection.addEventListener('click', () => {
+  void deleteCurrentSelection();
+});
+
+elements.selectionPropertiesForm.addEventListener('submit', (event) => {
+  void applyElementProperties(event);
 });
 
 elements.saveDocument.addEventListener('click', () => {
