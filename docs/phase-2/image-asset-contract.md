@@ -32,7 +32,7 @@ Conversion rules:
 - the `<image>` element uses `preserveAspectRatio="none"` so its pixels fill the element bounds like the legacy stretched draw path;
 - existing element rotation is preserved by the shared SVG transform contract.
 
-The PNG encoding is an implementation detail of the SVG facade. DDNX and `next-domain` continue to store the original raster representation rather than renderer output.
+The PNG encoding is an implementation detail of the SVG facade. It is regenerated deterministically from the immutable raster asset bytes when the SVG is materialized; no PNG copy is introduced into document state. DDNX and `next-domain` continue to store the original raster representation rather than renderer output.
 
 ## Diagnostics and failure behaviour
 
