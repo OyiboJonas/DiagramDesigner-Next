@@ -35,9 +35,7 @@ pub(super) fn apply_layer_references(
             continue;
         };
 
-        if recursion_stack.contains(&item.element.id)
-            || !element_geometry_is_finite(item.element)
-        {
+        if recursion_stack.contains(&item.element.id) || !element_geometry_is_finite(item.element) {
             // The pinned upstream object uses a per-instance `Drawing` guard.
             // Leaving the core LayerReference unsupported diagnostic in place is
             // intentional for recursive or malformed invocations: no fallback
@@ -233,7 +231,9 @@ fn primitive_family(kind: &ElementKind) -> RenderPrimitiveFamily {
         }
         ElementKind::Image { .. } => RenderPrimitiveFamily::Image,
         ElementKind::Metafile { .. } => RenderPrimitiveFamily::Metafile,
-        ElementKind::Group { .. } => unreachable!("groups are expanded before primitive classification"),
+        ElementKind::Group { .. } => {
+            unreachable!("groups are expanded before primitive classification")
+        }
         ElementKind::Polygon { .. } => RenderPrimitiveFamily::Polygon,
         ElementKind::Flowchart { .. } => RenderPrimitiveFamily::Flowchart,
         ElementKind::Curve { .. } => RenderPrimitiveFamily::Curve,
