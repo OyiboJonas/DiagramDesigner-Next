@@ -2,11 +2,12 @@ use std::error::Error;
 use std::io::{self, Write};
 
 use next_domain::{
-    AnchorSet, Color, Connector, ConnectorLabelStyle, Document, DocumentDefaults, DocumentId,
-    Element, ElementId, ElementKind, ElementStyle, Endpoint, FillStyle, GradientAxis, Layer,
-    LayerId, LineStyle, LinearGradient, MarkerStyle, NextArtifact, NormalizedPoint, Page, PageId,
-    Point, Rect, RichTextDocument, RichTextToken, Scene, Size, StrokeStyle, StyleId, TextBlock,
-    TextHorizontalAlignment, TextLayout, TextStyle, TextVerticalAlignment,
+    AnchorSet, Asset, AssetId, AssetPayload, Color, Connector, ConnectorLabelStyle, Document,
+    DocumentDefaults, DocumentId, Element, ElementId, ElementKind, ElementStyle, Endpoint,
+    FillStyle, GradientAxis, Layer, LayerId, LineStyle, LinearGradient, MarkerStyle, NextArtifact,
+    NormalizedPoint, Page, PageId, Point, Rect, RichTextDocument, RichTextToken, Scene, Size,
+    StrokeStyle, StyleId, TextBlock, TextHorizontalAlignment, TextLayout, TextStyle,
+    TextVerticalAlignment,
 };
 use render_plan::{RenderPlanOptions, build_page_plan};
 use render_svg::{SvgRenderOptions, render_plan_to_svg};
@@ -67,6 +68,8 @@ fn fidelity_document() -> (Document, PageId) {
     let marker_connector_id = ElementId::v5(namespace, "adr-019-fidelity/element/marker");
     let deferred_label_id = ElementId::v5(namespace, "adr-019-fidelity/element/diagnostic-label");
     let polygon_id = ElementId::v5(namespace, "adr-019-fidelity/element/polygon");
+    let raster_image_id = ElementId::v5(namespace, "adr-019-fidelity/element/raster-image");
+    let raster_asset_id = AssetId::v5(namespace, "adr-019-fidelity/asset/raster-image");
     let edge_left_id = ElementId::v5(namespace, "adr-019-fidelity/element/edge-left");
     let edge_right_id = ElementId::v5(namespace, "adr-019-fidelity/element/edge-right");
     let edge_top_id = ElementId::v5(namespace, "adr-019-fidelity/element/edge-top");
@@ -214,7 +217,7 @@ fn fidelity_document() -> (Document, PageId) {
     deferred_label.text = Some(TextBlock {
         content: RichTextDocument {
             tokens: vec![RichTextToken::Text {
-                text: "Arrow marker and polygon are rendered by the Phase-2 production facade"
+                text: "Arrow marker, polygon and raster image are rendered by the Phase-2 production facade"
                     .to_owned(),
                 style: TextStyle {
                     font_size_pt: Some(8),
@@ -248,6 +251,22 @@ fn fidelity_document() -> (Document, PageId) {
                 NormalizedPoint { x: 0.5, y: 0.0 },
                 NormalizedPoint { x: 1.0, y: 1.0 },
             ],
+        },
+    );
+
+    let raster_image = element(
+        raster_image_id,
+        "Rendered raster image sentinel",
+        Rect {
+            x: 214.0,
+            y: 154.0,
+            width: 28.0,
+            height: 18.0,
+        },
+        0.0,
+        None,
+        ElementKind::Image {
+            asset_id: raster_asset_id,
         },
     );
 
@@ -325,6 +344,7 @@ fn fidelity_document() -> (Document, PageId) {
         marker_connector,
         deferred_label,
         polygon,
+        raster_image,
         edge_left,
         edge_right,
         edge_top,
@@ -423,7 +443,20 @@ fn fidelity_document() -> (Document, PageId) {
                 text_color: None,
             },
         ],
-        assets: Vec::new(),
+        assets: vec![Asset {
+            id: raster_asset_id,
+            sha256: "3211a3f4ef985496bca12a5c1a89bd8d0bf92c22432d435815836fd293561a37".to_owned(),
+            media_type: "application/vnd.diagramdesigner-next.raster".to_owned(),
+            payload: AssetPayload::Raster {
+                width: 2,
+                height: 2,
+                bits_per_pixel: 24,
+                palette: None,
+                pixels: vec![0, 0, 255, 0, 255, 0, 255, 0, 0, 0, 255, 255],
+                alpha: Some(vec![255, 192, 128, 64]),
+                alpha_value: 192,
+            },
+        }],
         import: None,
     };
 

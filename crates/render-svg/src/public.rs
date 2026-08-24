@@ -6,10 +6,13 @@
 
 #[path = "lib.rs"]
 mod core;
+mod image;
 mod orthogonal;
 mod polygon;
 
-pub use core::{SvgDiagnostic, SvgRenderError, SvgRenderOptions, SvgRenderOutput};
+pub use core::{
+    RasterAssetIssue, SvgDiagnostic, SvgRenderError, SvgRenderOptions, SvgRenderOutput,
+};
 
 use std::fmt::Write as _;
 
@@ -38,6 +41,7 @@ pub fn render_plan_to_svg(
 ) -> Result<SvgRenderOutput, SvgRenderError> {
     let mut output = core::render_plan_to_svg(document, page_id, plan, options)?;
     polygon::apply_polygons(document, plan, &mut output);
+    image::apply_images(document, plan, &mut output);
     orthogonal::apply_orthogonal_connectors(document, plan, &mut output);
     apply_outline_straight_connectors(document, plan, &mut output);
     apply_standard_connector_markers(document, plan, &mut output);

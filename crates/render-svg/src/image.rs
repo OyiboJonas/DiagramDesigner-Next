@@ -1,7 +1,7 @@
 use std::io::Write as _;
 
 use flate2::{Compression, write::ZlibEncoder};
-use next_domain::{AssetId, AssetPayload, Document, Element, ElementId, ElementKind, Rect};
+use next_domain::{AssetId, AssetPayload, Document, Element, ElementKind, Rect};
 use render_plan::RenderPlan;
 
 use super::{RasterAssetIssue, SvgDiagnostic, SvgRenderOutput, num, rotation_attribute};
@@ -19,9 +19,10 @@ pub(super) fn apply_images(
     // relative ordering with other Phase-2 facade primitives such as polygons.
     for index in (0..plan.items.len()).rev() {
         let item = &plan.items[index];
-        let ElementKind::Image { asset_id } = item.element.kind else {
+        let ElementKind::Image { asset_id } = &item.element.kind else {
             continue;
         };
+        let asset_id = *asset_id;
 
         // The core already owns invalid element-geometry diagnostics and does not
         // emit UnsupportedPrimitive for those elements, so leave them untouched.
@@ -197,13 +198,13 @@ fn raster_to_rgba(
         }
     }
 
-    if let Some(alpha) = alpha
-        && alpha.len() != pixel_count
-    {
-        return Err(RasterAssetIssue::InvalidAlphaLength {
-            expected: pixel_count,
-            actual: alpha.len(),
-        });
+    if let Some(alpha) = alpha {
+        if alpha.len() != pixel_count {
+            return Err(RasterAssetIssue::InvalidAlphaLength {
+                expected: pixel_count,
+                actual: alpha.len(),
+            });
+        }
     }
 
     let rgba_len = pixel_count
@@ -235,8 +236,8 @@ fn raster_to_rgba(
             _ => unreachable!("bits-per-pixel validated above"),
         };
         let per_pixel_alpha = alpha.map(|values| values[index]).unwrap_or(255);
-        let combined_alpha = ((u16::from(per_pixel_alpha) * u16::from(alpha_value) + 127) / 255)
-            as u8;
+        let combined_alpha =
+            ((u16::from(per_pixel_alpha) * u16::from(alpha_value) + 127) / 255) as u8;
         rgba.extend_from_slice(&[red, green, blue, combined_alpha]);
     }
 
@@ -248,9 +249,7 @@ fn encode_rgba_png(width: i32, height: i32, rgba: &[u8]) -> Result<Vec<u8>, Rast
     let height_u32 = u32::try_from(height).map_err(|_| RasterAssetIssue::InvalidDimensions)?;
     let width = usize::try_from(width).map_err(|_| RasterAssetIssue::InvalidDimensions)?;
     let height = usize::try_from(height).map_err(|_| RasterAssetIssue::InvalidDimensions)?;
-    let row_len = width
-        .checked_mul(4)
-        .ok_or(RasterAssetIssue::SizeOverflow)?;
+    let row_len = width.checked_mul(4).ok_or(RasterAssetIssue::SizeOverflow)?;
     let expected_rgba = row_len
         .checked_mul(height)
         .ok_or(RasterAssetIssue::SizeOverflow)?;
@@ -316,8 +315,7 @@ fn crc32(bytes: &[u8]) -> u32 {
 }
 
 fn base64_encode(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
     let mut index = 0usize;
     while index < bytes.len() {
@@ -325,13 +323,9 @@ fn base64_encode(bytes: &[u8]) -> String {
         let b1 = bytes.get(index + 1).copied();
         let b2 = bytes.get(index + 2).copied();
         output.push(TABLE[(b0 >> 2) as usize] as char);
-        output.push(
-            TABLE[(((b0 & 0x03) << 4) | b1.unwrap_or(0) >> 4) as usize] as char,
-        );
+        output.push(TABLE[(((b0 & 0x03) << 4) | b1.unwrap_or(0) >> 4) as usize] as char);
         if let Some(b1) = b1 {
-            output.push(
-                TABLE[(((b1 & 0x0f) << 2) | b2.unwrap_or(0) >> 6) as usize] as char,
-            );
+            output.push(TABLE[(((b1 & 0x0f) << 2) | b2.unwrap_or(0) >> 6) as usize] as char);
         } else {
             output.push('=');
         }

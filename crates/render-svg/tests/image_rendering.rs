@@ -3,8 +3,8 @@ use std::io::Read as _;
 use flate2::read::ZlibDecoder;
 use next_domain::{
     AnchorSet, Asset, AssetId, AssetPayload, ConnectorLabelStyle, Document, DocumentDefaults,
-    DocumentId, Element, ElementId, ElementKind, Layer, LayerId, NormalizedPoint, Page, Rect, Scene,
-    Size,
+    DocumentId, Element, ElementId, ElementKind, Layer, LayerId, NormalizedPoint, Page, Rect,
+    Scene, Size,
 };
 use render_plan::{RenderPlanOptions, build_page_plan};
 use render_svg::{
@@ -185,16 +185,7 @@ fn missing_binary_and_malformed_assets_keep_images_skipped_with_typed_diagnostic
             bytes: vec![1, 2, 3],
         },
     };
-    let malformed = raster_asset(
-        malformed_asset_id,
-        2,
-        1,
-        24,
-        None,
-        vec![0, 1, 2],
-        None,
-        255,
-    );
+    let malformed = raster_asset(malformed_asset_id, 2, 1, 24, None, vec![0, 1, 2], None, 255);
     let (document, page_id) = document(
         vec![
             image(missing_image_id, missing_asset_id, 10.0),
@@ -241,16 +232,7 @@ fn preserves_plan_order_across_image_polygon_and_core_primitive() {
     let image_id = ElementId::new();
     let polygon_id = ElementId::new();
     let rectangle_id = ElementId::new();
-    let asset = raster_asset(
-        asset_id,
-        1,
-        1,
-        24,
-        None,
-        vec![30, 20, 10],
-        None,
-        255,
-    );
+    let asset = raster_asset(asset_id, 1, 1, 24, None, vec![30, 20, 10], None, 255);
     let polygon = element(
         polygon_id,
         40.0,
