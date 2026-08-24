@@ -1,12 +1,12 @@
 //! Phase-2 production SVG facade.
 //!
-//! The selected SVG renderer remains the stable production backend. Metafile
-//! conversion is intentionally supplied as disposable renderer-local renditions so
-//! preserved legacy binary assets never leak platform conversion state into
-//! `next-domain` or editor history.
+//! The selected SVG renderer remains the stable production backend. Compatibility
+//! semantics are layered outside `next-domain` so renderer-specific state never
+//! leaks into editor history or semantic commands.
 
 #[path = "public.rs"]
 mod existing;
+mod flowchart;
 mod metafile;
 
 pub use existing::{
@@ -21,7 +21,8 @@ use render_plan::RenderPlan;
 ///
 /// Legacy metafiles remain explicit unsupported primitives unless a platform layer
 /// supplies a verified browser-renderable rendition via
-/// [`render_plan_to_svg_with_metafile_renditions`].
+/// [`render_plan_to_svg_with_metafile_renditions`]. Known public legacy flowchart
+/// shapes are materialized by the renderer-local Phase-2 compatibility layer.
 pub fn render_plan_to_svg(
     document: &Document,
     page_id: PageId,
@@ -50,6 +51,7 @@ pub fn render_plan_to_svg_with_metafile_renditions(
     renditions: &MetafileRenditions,
 ) -> Result<SvgRenderOutput, SvgRenderError> {
     let mut output = existing::render_plan_to_svg(document, page_id, plan, options)?;
+    flowchart::apply_flowcharts(document, plan, &mut output);
     metafile::apply_metafiles(document, plan, renditions, &mut output);
     Ok(output)
 }
