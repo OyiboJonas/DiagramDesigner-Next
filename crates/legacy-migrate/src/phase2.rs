@@ -18,7 +18,7 @@ pub fn migrate_bytes(
     options: MigrationOptions,
 ) -> Result<NextArtifact, MigrationError> {
     let mut artifact = existing::migrate_bytes(bytes, max_inflated_bytes, options)?;
-    normalize_legacy_metafile_rotations(&mut artifact);
+    normalize_legacy_rotations(&mut artifact);
     Ok(artifact)
 }
 
@@ -36,11 +36,11 @@ pub fn migrate_decoded(
         source_sha256,
         options,
     )?;
-    normalize_legacy_metafile_rotations(&mut artifact);
+    normalize_legacy_rotations(&mut artifact);
     Ok(artifact)
 }
 
-fn normalize_legacy_metafile_rotations(artifact: &mut NextArtifact) {
+fn normalize_legacy_rotations(artifact: &mut NextArtifact) {
     match &mut artifact.artifact {
         Artifact::Document(document) => {
             for layer in &mut document.master_layers {
@@ -58,18 +58,24 @@ fn normalize_legacy_metafile_rotations(artifact: &mut NextArtifact) {
 
 fn normalize_scene(scene: &mut Scene) {
     for element in &mut scene.elements {
-        if !matches!(&element.kind, ElementKind::Metafile { .. }) {
+        let raw_key = match &element.kind {
+            ElementKind::Text => Some("text_angle_bits"),
+            ElementKind::Metafile { .. } => Some("metafile_angle_bits"),
+            _ => None,
+        };
+        let Some(raw_key) = raw_key else {
             continue;
-        }
+        };
 
-        // `TMetafileObject` stores a Delphi `Single` angle and feeds it directly
-        // to Sin/Cos and RotatePoint. That serialized value is therefore radians.
-        // The Next domain deliberately names the destination field `rotation_deg`,
-        // so conversion belongs at the legacy import boundary.
+        // Public DiagramDesigner `TTextObject` and `TMetafileObject` both store a
+        // Delphi `Single` angle in radians. Text drawing explicitly converts with
+        // `Angle * 180 / Pi`; metafile drawing feeds the same unit to Sin/Cos and
+        // RotatePoint. Next deliberately names the destination `rotation_deg`, so
+        // the representation conversion belongs at this legacy import boundary.
         let legacy_radians = element.rotation_deg as f32;
         if let Some(import) = &mut element.import {
             import.raw_values.insert(
-                "metafile_angle_bits".to_owned(),
+                raw_key.to_owned(),
                 legacy_radians.to_bits() as i64,
             );
         }
