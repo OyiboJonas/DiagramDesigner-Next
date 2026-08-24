@@ -28,6 +28,7 @@ fn main() {
             "set_selection",
             "selection_properties",
             "create_basic_element",
+            "create_connector",
             "delete_selection",
             "update_element_properties",
             "new_document",
