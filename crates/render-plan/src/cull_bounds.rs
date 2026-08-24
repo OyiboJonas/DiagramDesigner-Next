@@ -3,6 +3,7 @@ use next_domain::{Element, ElementKind, MarkerStyle, Rect};
 use super::rotated_aabb;
 
 const PT_TO_MM: f64 = 25.4 / 72.0;
+const FLOWCHART_KEY_PREFIX: &str = "builtin:diagramdesigner-flowchart/";
 
 /// Conservative renderer-independent culling bounds for one planned element.
 ///
@@ -13,6 +14,10 @@ const PT_TO_MM: f64 = 25.4 / 72.0;
 /// Expanding every side by that maximum is intentionally conservative: it keeps
 /// both the cold planner and `PreparedPage` from dropping a dogleg that is still
 /// visible inside the viewport without storing renderer-specific route state.
+///
+/// Some public `TFlowchartObject` shapes also draw outside their serialized object
+/// rectangle. Slanted shapes extend horizontally by one eighth of the object
+/// height, while `foOddRounded2` extends its right-hand curve by half the height.
 pub(crate) fn element_cull_bounds(element: &Element) -> Option<Rect> {
     if !rect_is_finite(element.bounds_mm) || !element.rotation_deg.is_finite() {
         return None;
@@ -36,7 +41,28 @@ pub(crate) fn element_cull_bounds(element: &Element) -> Option<Rect> {
         bounds = expand_rect(bounds, clearance);
     }
 
+    if let ElementKind::Flowchart { shape_key } = &element.kind {
+        match flowchart_code(shape_key) {
+            Some(0x31 | 0x32) => {
+                let excursion = bounds.height / 8.0;
+                bounds.x -= excursion;
+                bounds.width += excursion * 2.0;
+            }
+            Some(0x51) => {
+                bounds.width += bounds.height / 2.0;
+            }
+            _ => {}
+        }
+    }
+
     Some(rotated_aabb(bounds, element.rotation_deg))
+}
+
+fn flowchart_code(shape_key: &str) -> Option<i32> {
+    shape_key
+        .strip_prefix(FLOWCHART_KEY_PREFIX)?
+        .parse::<i32>()
+        .ok()
 }
 
 fn marker_size_group(marker: MarkerStyle) -> f64 {
@@ -134,6 +160,28 @@ mod tests {
         }
     }
 
+    fn flowchart(code: i32) -> Element {
+        Element {
+            id: ElementId::new(),
+            name: String::new(),
+            bounds_mm: Rect {
+                x: 100.0,
+                y: 100.0,
+                width: 20.0,
+                height: 40.0,
+            },
+            rotation_deg: 0.0,
+            anchors: AnchorSet::default(),
+            ports: Vec::new(),
+            style_id: None,
+            text: None,
+            kind: ElementKind::Flowchart {
+                shape_key: format!("{FLOWCHART_KEY_PREFIX}{code}"),
+            },
+            import: None,
+        }
+    }
+
     #[test]
     fn orthogonal_bounds_include_legacy_same_direction_clearance() {
         let bounds = element_cull_bounds(&orthogonal(MarkerStyle::UmlIsA, 1.0)).unwrap();
@@ -149,5 +197,23 @@ mod tests {
         assert_eq!(bounds.y, 84.0);
         assert_eq!(bounds.width, 52.0);
         assert_eq!(bounds.height, 42.0);
+    }
+
+    #[test]
+    fn slanted_flowchart_bounds_include_one_eighth_height_excursion() {
+        let bounds = element_cull_bounds(&flowchart(0x31)).unwrap();
+        assert_eq!(bounds.x, 95.0);
+        assert_eq!(bounds.width, 30.0);
+        assert_eq!(bounds.y, 100.0);
+        assert_eq!(bounds.height, 40.0);
+    }
+
+    #[test]
+    fn odd_rounded_2_bounds_include_right_half_height_excursion() {
+        let bounds = element_cull_bounds(&flowchart(0x51)).unwrap();
+        assert_eq!(bounds.x, 100.0);
+        assert_eq!(bounds.width, 40.0);
+        assert_eq!(bounds.y, 100.0);
+        assert_eq!(bounds.height, 40.0);
     }
 }
