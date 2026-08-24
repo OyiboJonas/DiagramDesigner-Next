@@ -4,6 +4,7 @@
 //! semantics are layered outside `next-domain` so renderer-specific state never
 //! leaks into editor history or semantic commands.
 
+mod curve;
 #[path = "public.rs"]
 mod existing;
 mod flowchart;
@@ -21,8 +22,9 @@ use render_plan::RenderPlan;
 ///
 /// Legacy metafiles remain explicit unsupported primitives unless a platform layer
 /// supplies a verified browser-renderable rendition via
-/// [`render_plan_to_svg_with_metafile_renditions`]. Known public legacy flowchart
-/// shapes are materialized by the renderer-local Phase-2 compatibility layer.
+/// [`render_plan_to_svg_with_metafile_renditions`]. Known public legacy curve and
+/// flowchart families are materialized by renderer-local Phase-2 compatibility
+/// layers.
 pub fn render_plan_to_svg(
     document: &Document,
     page_id: PageId,
@@ -51,6 +53,7 @@ pub fn render_plan_to_svg_with_metafile_renditions(
     renditions: &MetafileRenditions,
 ) -> Result<SvgRenderOutput, SvgRenderError> {
     let mut output = existing::render_plan_to_svg(document, page_id, plan, options)?;
+    curve::apply_curves(document, plan, &mut output);
     flowchart::apply_flowcharts(document, plan, &mut output);
     metafile::apply_metafiles(document, plan, renditions, &mut output);
     Ok(output)
