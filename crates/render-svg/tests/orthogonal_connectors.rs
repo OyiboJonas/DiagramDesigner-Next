@@ -34,8 +34,7 @@ fn rectangle(id: ElementId, bounds_mm: Rect, ports: Vec<Port>) -> Element {
     }
 }
 
-fn orthogonal(
-    id: ElementId,
+struct OrthogonalSpec {
     start: Endpoint,
     end: Endpoint,
     start_marker: MarkerStyle,
@@ -44,7 +43,19 @@ fn orthogonal(
     corner_radius_mm: f64,
     style_id: Option<StyleId>,
     secondary_color: Option<Color>,
-) -> Element {
+}
+
+fn orthogonal(id: ElementId, spec: OrthogonalSpec) -> Element {
+    let OrthogonalSpec {
+        start,
+        end,
+        start_marker,
+        end_marker,
+        line_style,
+        corner_radius_mm,
+        style_id,
+        secondary_color,
+    } = spec;
     let min_x = start.position_mm.x.min(end.position_mm.x);
     let min_y = start.position_mm.y.min(end.position_mm.y);
     Element {
@@ -152,26 +163,28 @@ fn same_side_vertical_ports_keep_the_legacy_marker_clearance_hairpin() {
     );
     let connector = orthogonal(
         connector_id,
-        Endpoint {
-            position_mm: Point { x: 20.0, y: 30.0 },
-            connection: Some(Connection {
-                element_id: first_id,
-                port_id: first_port,
-            }),
+        OrthogonalSpec {
+            start: Endpoint {
+                position_mm: Point { x: 20.0, y: 30.0 },
+                connection: Some(Connection {
+                    element_id: first_id,
+                    port_id: first_port,
+                }),
+            },
+            end: Endpoint {
+                position_mm: Point { x: 20.0, y: 70.0 },
+                connection: Some(Connection {
+                    element_id: second_id,
+                    port_id: second_port,
+                }),
+            },
+            start_marker: MarkerStyle::Arrow3,
+            end_marker: MarkerStyle::Arrow3,
+            line_style: LineStyle::Solid,
+            corner_radius_mm: 0.0,
+            style_id: None,
+            secondary_color: None,
         },
-        Endpoint {
-            position_mm: Point { x: 20.0, y: 70.0 },
-            connection: Some(Connection {
-                element_id: second_id,
-                port_id: second_port,
-            }),
-        },
-        MarkerStyle::Arrow3,
-        MarkerStyle::Arrow3,
-        LineStyle::Solid,
-        0.0,
-        None,
-        None,
     );
 
     let (document, page_id) = document(vec![first, second, connector], Vec::new());
@@ -204,20 +217,22 @@ fn styled_vertical_route_preserves_the_upstream_midpoint_segment_reset() {
     let connector_id = ElementId::new();
     let connector = orthogonal(
         connector_id,
-        Endpoint {
-            position_mm: Point { x: 10.0, y: 10.0 },
-            connection: None,
+        OrthogonalSpec {
+            start: Endpoint {
+                position_mm: Point { x: 10.0, y: 10.0 },
+                connection: None,
+            },
+            end: Endpoint {
+                position_mm: Point { x: 50.0, y: 70.0 },
+                connection: None,
+            },
+            start_marker: MarkerStyle::None,
+            end_marker: MarkerStyle::None,
+            line_style: LineStyle::Dotted1,
+            corner_radius_mm: 8.0,
+            style_id: None,
+            secondary_color: None,
         },
-        Endpoint {
-            position_mm: Point { x: 50.0, y: 70.0 },
-            connection: None,
-        },
-        MarkerStyle::None,
-        MarkerStyle::None,
-        LineStyle::Dotted1,
-        8.0,
-        None,
-        None,
     );
     let (document, page_id) = document(vec![connector], Vec::new());
     let output = render(&document, page_id);
@@ -272,31 +287,33 @@ fn rounded_outline_route_reuses_secondary_paint_and_standard_markers() {
     );
     let connector = orthogonal(
         connector_id,
-        Endpoint {
-            position_mm: Point { x: 30.0, y: 30.0 },
-            connection: Some(Connection {
-                element_id: left_id,
-                port_id: left_port,
+        OrthogonalSpec {
+            start: Endpoint {
+                position_mm: Point { x: 30.0, y: 30.0 },
+                connection: Some(Connection {
+                    element_id: left_id,
+                    port_id: left_port,
+                }),
+            },
+            end: Endpoint {
+                position_mm: Point { x: 70.0, y: 70.0 },
+                connection: Some(Connection {
+                    element_id: top_id,
+                    port_id: top_port,
+                }),
+            },
+            start_marker: MarkerStyle::Many,
+            end_marker: MarkerStyle::Arrow2,
+            line_style: LineStyle::Outline,
+            corner_radius_mm: 5.0,
+            style_id: Some(style_id),
+            secondary_color: Some(Color::Rgba {
+                r: 200,
+                g: 30,
+                b: 40,
+                a: 128,
             }),
         },
-        Endpoint {
-            position_mm: Point { x: 70.0, y: 70.0 },
-            connection: Some(Connection {
-                element_id: top_id,
-                port_id: top_port,
-            }),
-        },
-        MarkerStyle::Many,
-        MarkerStyle::Arrow2,
-        LineStyle::Outline,
-        5.0,
-        Some(style_id),
-        Some(Color::Rgba {
-            r: 200,
-            g: 30,
-            b: 40,
-            a: 128,
-        }),
     );
     let style = ElementStyle {
         id: style_id,
@@ -353,20 +370,22 @@ fn custom_orthogonal_styles_remain_explicit_diagnostics() {
     let connector_id = ElementId::new();
     let connector = orthogonal(
         connector_id,
-        Endpoint {
-            position_mm: Point { x: 20.0, y: 20.0 },
-            connection: None,
+        OrthogonalSpec {
+            start: Endpoint {
+                position_mm: Point { x: 20.0, y: 20.0 },
+                connection: None,
+            },
+            end: Endpoint {
+                position_mm: Point { x: 80.0, y: 50.0 },
+                connection: None,
+            },
+            start_marker: MarkerStyle::Custom(0x72),
+            end_marker: MarkerStyle::None,
+            line_style: LineStyle::Custom(0x71),
+            corner_radius_mm: 0.0,
+            style_id: None,
+            secondary_color: None,
         },
-        Endpoint {
-            position_mm: Point { x: 80.0, y: 50.0 },
-            connection: None,
-        },
-        MarkerStyle::Custom(0x72),
-        MarkerStyle::None,
-        LineStyle::Custom(0x71),
-        0.0,
-        None,
-        None,
     );
     let (document, page_id) = document(vec![connector], Vec::new());
     let output = render(&document, page_id);
