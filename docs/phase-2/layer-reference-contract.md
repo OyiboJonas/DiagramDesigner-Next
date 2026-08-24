@@ -62,9 +62,11 @@ The renderer maintains a stack of layer-reference element IDs. If the same refer
 
 The selected core renderer's typed `UnsupportedPrimitive { family: LayerReference }` diagnostic is retired only for a reference invocation that is actually resolved and materialized. Invalid page/layer indices, malformed geometry, and recursion-suppressed nested invocations retain explicit unsupported diagnostics; no placeholder rectangle or guessed target is drawn.
 
-## Paint and z-order
+## Paint, definition isolation and z-order
 
 A layer reference has no independent fill/stroke paint contract. Its visual result is the referenced layer content.
+
+The same target layer can be referenced multiple times. Referenced SVG can therefore contain repeated definition IDs for gradients, markers or other `<defs>` resources derived from the same source element IDs. Before a referenced SVG is embedded, renderer-local definition IDs and their `url(#...)` / fragment references are namespaced by the current layer-reference element ID. Nested references apply the same rule recursively, so sibling or repeated references cannot collide while stable domain `ElementId` values remain unchanged.
 
 The reference fragment occupies the original reference element's position in the current render-plan order. Content within the referenced layer preserves that layer's root/group traversal order and uses the same production SVG compatibility pipeline as top-level content, including curves, flowcharts, raster images, connector semantics and optional metafile renditions.
 
@@ -82,9 +84,11 @@ Synthetic renderer tests cover:
 - forward relative page references;
 - independent X/Y page-to-reference scaling;
 - target-layer content and z-order;
+- direct target-layer rendering independent of the Next-only page visibility flag;
 - invalid target page indices remaining typed unsupported;
 - nested relative references resolving from each target page;
 - recursion suppression without placeholder rendering;
+- repeated references receiving isolated SVG definition IDs without changing source element IDs;
 - cold `render-plan` versus `PreparedPage` viewport equivalence.
 
 No private `.ddd` fixtures or private-corpus metadata are required for this contract.
