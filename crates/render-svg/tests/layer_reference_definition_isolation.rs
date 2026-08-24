@@ -205,14 +205,8 @@ fn repeated_references_namespace_svg_definition_ids_without_changing_element_ids
         render_plan_to_svg(&document, page0_id, &plan, SvgRenderOptions::default()).unwrap();
 
     let base_gradient = format!("gradient-{}", target_id.0);
-    let first_gradient = format!(
-        "ddn-layer-ref-{}-{base_gradient}",
-        first_reference_id.0
-    );
-    let second_gradient = format!(
-        "ddn-layer-ref-{}-{base_gradient}",
-        second_reference_id.0
-    );
+    let first_gradient = format!("ddn-layer-ref-{}-{base_gradient}", first_reference_id.0);
+    let second_gradient = format!("ddn-layer-ref-{}-{base_gradient}", second_reference_id.0);
 
     assert!(output.svg.contains(&format!("id=\"{first_gradient}\"")));
     assert!(output.svg.contains(&format!("url(#{first_gradient})")));
