@@ -10,7 +10,6 @@ use std::{
 
 use app_core::ApplicationSession;
 use ddnx::PackageLimits;
-use editor_core::LayerTarget;
 use editor_runtime::RecoveryPlan;
 use next_domain::{
     AnchorSet, ConnectorLabelStyle, Document, DocumentDefaults, DocumentId, Element, ElementId,
@@ -555,9 +554,7 @@ fn create_basic_element(
 }
 
 #[tauri::command]
-fn delete_selection(
-    state: State<'_, DesktopState>,
-) -> Result<ElementEditResultDto, CommandError> {
+fn delete_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultDto, CommandError> {
     let mut document = lock_document(&state)?;
     let selected: Vec<_> = document
         .session
@@ -1068,11 +1065,7 @@ fn text_preview(block: &TextBlock) -> (String, bool, Option<TextStyle>) {
     (preview, editable, common_style)
 }
 
-fn simple_text_block(
-    text: &str,
-    style: TextStyle,
-    layout: Option<TextLayout>,
-) -> TextBlock {
+fn simple_text_block(text: &str, style: TextStyle, layout: Option<TextLayout>) -> TextBlock {
     let mut tokens = Vec::new();
     let mut lines = text.split('\n').peekable();
     while let Some(line) = lines.next() {

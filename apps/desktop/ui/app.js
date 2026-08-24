@@ -93,6 +93,11 @@ function setBusy(busy) {
   for (const button of actionButtons) {
     button.disabled = busy;
   }
+  if (!busy) {
+    const selectionCount = Number(currentSelectionProperties?.count ?? 0);
+    elements.deleteSelection.disabled = selectionCount === 0;
+    elements.applyProperties.disabled = !currentSelectionProperties?.primary;
+  }
 }
 
 function setRecoveryBusy(busy) {

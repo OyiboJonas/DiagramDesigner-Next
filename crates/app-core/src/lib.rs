@@ -140,8 +140,6 @@ impl ApplicationSession {
         Ok(())
     }
 
-    /// Commit the final document-space delta from a completed frontend move
-    /// gesture. Raw pointer updates must never call this method.
     fn execute_edit(&mut self, command: EditCommand) -> Result<bool, ApplicationError> {
         let changed = self.runtime.session_mut().execute(command)?;
         self.sync_editor_saved_marker();
@@ -152,11 +150,16 @@ impl ApplicationSession {
         &mut self,
         transaction: EditTransaction,
     ) -> Result<bool, ApplicationError> {
-        let changed = self.runtime.session_mut().execute_transaction(transaction)?;
+        let changed = self
+            .runtime
+            .session_mut()
+            .execute_transaction(transaction)?;
         self.sync_editor_saved_marker();
         Ok(changed)
     }
 
+    /// Commit the final document-space delta from a completed frontend move
+    /// gesture. Raw pointer updates must never call this method.
     pub fn commit_move_elements(
         &mut self,
         element_ids: Vec<ElementId>,
@@ -530,11 +533,13 @@ mod tests {
         let after_create = app.session().current_history_state();
         assert_ne!(after_create, initial);
         assert!(app.is_dirty());
-        assert!(app.session().document().pages[0].layers[0]
-            .scene
-            .elements
-            .iter()
-            .any(|element| element.id == created_id));
+        assert!(
+            app.session().document().pages[0].layers[0]
+                .scene
+                .elements
+                .iter()
+                .any(|element| element.id == created_id)
+        );
 
         let updated_bounds = Rect {
             x: 30.0,
@@ -542,9 +547,10 @@ mod tests {
             width: 55.0,
             height: 28.0,
         };
-        assert!(app
-            .commit_element_properties(created_id, updated_bounds, 22.5, None)
-            .unwrap());
+        assert!(
+            app.commit_element_properties(created_id, updated_bounds, 22.5, None)
+                .unwrap()
+        );
         let created = app.session().document().pages[0].layers[0]
             .scene
             .elements
@@ -555,21 +561,24 @@ mod tests {
         assert_eq!(created.rotation_deg, 22.5);
 
         assert!(app.delete_elements(vec![created_id]).unwrap());
-        assert!(!app.session().document().pages[0].layers[0]
-            .scene
-            .elements
-            .iter()
-            .any(|element| element.id == created_id));
+        assert!(
+            !app.session().document().pages[0].layers[0]
+                .scene
+                .elements
+                .iter()
+                .any(|element| element.id == created_id)
+        );
         assert!(app.undo().unwrap());
-        assert!(app.session().document().pages[0].layers[0]
-            .scene
-            .elements
-            .iter()
-            .any(|element| element.id == created_id));
+        assert!(
+            app.session().document().pages[0].layers[0]
+                .scene
+                .elements
+                .iter()
+                .any(|element| element.id == created_id)
+        );
         assert!(app.undo().unwrap());
         assert!(app.undo().unwrap());
         assert_eq!(app.session().current_history_state(), initial);
         assert!(!app.is_dirty());
     }
-
 }
