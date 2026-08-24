@@ -74,10 +74,9 @@ fn normalize_scene(scene: &mut Scene) {
         // the representation conversion belongs at this legacy import boundary.
         let legacy_radians = element.rotation_deg as f32;
         if let Some(import) = &mut element.import {
-            import.raw_values.insert(
-                raw_key.to_owned(),
-                legacy_radians.to_bits() as i64,
-            );
+            import
+                .raw_values
+                .insert(raw_key.to_owned(), legacy_radians.to_bits() as i64);
         }
         element.rotation_deg = (legacy_radians as f64).to_degrees();
     }
