@@ -148,9 +148,21 @@ fn supplied_web_rendition_uses_legacy_stretch_and_center_rotation_contract() {
     assert_eq!(output.rendered_elements, 1);
     assert_eq!(output.skipped_elements, 0);
     assert!(output.svg.contains("<image"));
-    assert!(output.svg.contains(&format!("data-ddn-asset-id=\"{}\"", asset_id.0)));
-    assert!(output.svg.contains("data-ddn-metafile-rendition=\"image/png\""));
-    assert!(output.svg.contains("x=\"10\" y=\"10\" width=\"20\" height=\"12\""));
+    assert!(
+        output
+            .svg
+            .contains(&format!("data-ddn-asset-id=\"{}\"", asset_id.0))
+    );
+    assert!(
+        output
+            .svg
+            .contains("data-ddn-metafile-rendition=\"image/png\"")
+    );
+    assert!(
+        output
+            .svg
+            .contains("x=\"10\" y=\"10\" width=\"20\" height=\"12\"")
+    );
     assert!(output.svg.contains("preserveAspectRatio=\"none\""));
     assert!(output.svg.contains("transform=\"rotate(90 20 16)\""));
     assert!(output.svg.contains("href=\"data:image/png;base64,AQID\""));
