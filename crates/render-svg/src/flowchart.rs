@@ -1,6 +1,8 @@
 use std::{f64::consts::PI, fmt::Write as _};
 
-use next_domain::{Color, Document, Element, ElementId, ElementKind, ElementStyle, GradientAxis, Rect};
+use next_domain::{
+    Color, Document, Element, ElementId, ElementKind, ElementStyle, GradientAxis, Rect,
+};
 use render_plan::RenderPlan;
 
 use super::{SvgDiagnostic, SvgRenderOutput};
@@ -95,7 +97,10 @@ pub(super) fn apply_flowcharts(
 }
 
 fn parse_flowchart_kind(shape_key: &str) -> Option<FlowchartKind> {
-    let code = shape_key.strip_prefix(SHAPE_KEY_PREFIX)?.parse::<i32>().ok()?;
+    let code = shape_key
+        .strip_prefix(SHAPE_KEY_PREFIX)?
+        .parse::<i32>()
+        .ok()?;
     match code {
         0x11 => Some(FlowchartKind::SideBars),
         0x21 => Some(FlowchartKind::Rounded1),
@@ -196,25 +201,11 @@ fn render_flowchart(
                 ],
                 _ => unreachable!(),
             };
-            write_polygon(
-                &mut result,
-                defs,
-                element.id,
-                &points,
-                style,
-                diagnostics,
-            );
+            write_polygon(&mut result, defs, element.id, &points, style, diagnostics);
         }
         FlowchartKind::OddRounded1 | FlowchartKind::OddRounded2 => {
             let points = odd_rounded_points(bounds, kind);
-            write_polygon(
-                &mut result,
-                defs,
-                element.id,
-                &points,
-                style,
-                diagnostics,
-            );
+            write_polygon(&mut result, defs, element.id, &points, style, diagnostics);
         }
     }
 
