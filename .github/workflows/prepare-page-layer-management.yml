@@ -1,0 +1,48 @@
+name: Prepare page and layer management
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.head_ref == 'desktop-page-layer-management'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-page-layer-management
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Apply page/layer editor slice
+        run: python scripts/prepare-page-layer-management.py
+      - name: Format application core
+        run: cargo fmt --manifest-path crates/app-core/Cargo.toml
+      - name: Format desktop Rust
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Verify application core
+        run: cargo test --manifest-path crates/app-core/Cargo.toml
+      - name: Verify desktop JavaScript
+        run: node --check apps/desktop/ui/app.js
+      - name: Verify patch
+        run: git diff --check
+      - name: Commit prepared implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm scripts/prepare-page-layer-management.py
+          rm .github/workflows/prepare-page-layer-management.yml
+          rm -f crates/app-core/Cargo.lock
+          git config user.name "DiagramDesigner Next automation"
+          git config user.email "190651966+OyiboJonas@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Desktop: add page and layer management"
+          git push origin HEAD:desktop-page-layer-management
