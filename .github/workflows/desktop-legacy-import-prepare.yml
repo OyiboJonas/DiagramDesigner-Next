@@ -1,0 +1,46 @@
+name: Prepare desktop legacy import
+
+on:
+  push:
+    branches: [desktop-legacy-open-import]
+    paths:
+      - scripts/prepare-desktop-legacy-import.py
+      - .github/workflows/desktop-legacy-import-prepare.yml
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-legacy-open-import
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Apply desktop legacy import changes
+        run: python scripts/prepare-desktop-legacy-import.py
+      - name: Regenerate locked desktop dependency graph
+        run: cargo generate-lockfile --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Format Rust
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Verify desktop library
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+      - name: Verify desktop JavaScript
+        run: node --check apps/desktop/ui/app.js
+      - name: Commit prepared implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm scripts/prepare-desktop-legacy-import.py
+          rm .github/workflows/desktop-legacy-import-prepare.yml
+          git config user.name "DiagramDesigner Next automation"
+          git config user.email "190651966+OyiboJonas@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Desktop: import legacy DiagramDesigner files"
+          git push origin HEAD:desktop-legacy-open-import
