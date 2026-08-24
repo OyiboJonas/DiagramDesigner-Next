@@ -299,14 +299,9 @@ fn namespace_svg_ids(svg: &str, namespace: &str) -> String {
     let mut namespaced = svg.to_owned();
     for id in ids {
         let replacement = format!("{namespace}-{id}");
-        namespaced = namespaced.replace(
-            &format!(" id=\"{id}\""),
-            &format!(" id=\"{replacement}\""),
-        );
-        namespaced = namespaced.replace(
-            &format!("url(#{id})"),
-            &format!("url(#{replacement})"),
-        );
+        namespaced =
+            namespaced.replace(&format!(" id=\"{id}\""), &format!(" id=\"{replacement}\""));
+        namespaced = namespaced.replace(&format!("url(#{id})"), &format!("url(#{replacement})"));
         namespaced = namespaced.replace(
             &format!("href=\"#{id}\""),
             &format!("href=\"#{replacement}\""),
