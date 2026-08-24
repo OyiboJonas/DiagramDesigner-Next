@@ -41,12 +41,18 @@ fn curve(
     points: Vec<Point>,
     connector: Option<Connector>,
 ) -> Element {
-    let min_x = points.iter().map(|point| point.x).fold(f64::INFINITY, f64::min);
+    let min_x = points
+        .iter()
+        .map(|point| point.x)
+        .fold(f64::INFINITY, f64::min);
     let max_x = points
         .iter()
         .map(|point| point.x)
         .fold(f64::NEG_INFINITY, f64::max);
-    let min_y = points.iter().map(|point| point.y).fold(f64::INFINITY, f64::min);
+    let min_y = points
+        .iter()
+        .map(|point| point.y)
+        .fold(f64::INFINITY, f64::min);
     let max_y = points
         .iter()
         .map(|point| point.y)
@@ -233,9 +239,11 @@ fn bezier_repeats_the_last_point_until_the_public_polybezier_count_is_valid() {
     let output =
         render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
 
-    assert!(output.svg.contains(
-        "d=\"M 10 10 C 20 30,30 30,40 10 C 50 20,50 20,50 20\""
-    ));
+    assert!(
+        output
+            .svg
+            .contains("d=\"M 10 10 C 20 30,30 30,40 10 C 50 20,50 20,50 20\"")
+    );
 }
 
 #[test]
@@ -253,13 +261,7 @@ fn two_point_catmull_and_legacy_curves_use_the_public_straight_line_fallback() {
                 points.clone(),
                 None,
             ),
-            curve(
-                legacy_id,
-                style.id,
-                CurveKind::Legacy,
-                points,
-                None,
-            ),
+            curve(legacy_id, style.id, CurveKind::Legacy, points, None),
         ],
         style,
     );
@@ -295,15 +297,23 @@ fn curve_markers_use_curve_direction_points_and_outline_secondary_paint() {
     let output =
         render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
 
-    assert!(output.svg.contains("data-ddn-curve-marker-target=\"start\" x1=\"20\" y1=\"20\" x2=\"35\" y2=\"45\""));
-    assert!(output.svg.contains("data-ddn-curve-marker-target=\"end\" x1=\"65\" y1=\"45\" x2=\"80\" y2=\"20\""));
+    assert!(output.svg.contains(
+        "data-ddn-curve-marker-target=\"start\" x1=\"20\" y1=\"20\" x2=\"35\" y2=\"45\""
+    ));
+    assert!(
+        output.svg.contains(
+            "data-ddn-curve-marker-target=\"end\" x1=\"65\" y1=\"45\" x2=\"80\" y2=\"20\""
+        )
+    );
     assert!(output.svg.contains("data-ddn-marker-style=\"arrow2\""));
     assert!(output.svg.contains("data-ddn-marker-style=\"diamond\""));
     assert!(output.svg.contains("fill=\"#f0e6dc\""));
-    assert!(!output
-        .diagnostics
-        .iter()
-        .any(|diagnostic| matches!(diagnostic, SvgDiagnostic::ConnectorMarkerDeferred { .. })));
+    assert!(
+        !output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic, SvgDiagnostic::ConnectorMarkerDeferred { .. }))
+    );
     // TCurveLineObject.Draw forces a solid pen for the curve body. The stored
     // connector line style influences marker painting, not the path itself.
     assert!(!output.svg.contains("stroke-dasharray="));
