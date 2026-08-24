@@ -140,7 +140,8 @@ fn renders_all_eight_public_legacy_flowchart_kinds() {
         .collect();
     let (document, page_id) = document(elements, style);
     let plan = build_page_plan(&document, page_id, RenderPlanOptions::default()).unwrap();
-    let output = render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
+    let output =
+        render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
 
     assert_eq!(output.rendered_elements, 8);
     assert_eq!(output.skipped_elements, 0);
@@ -161,7 +162,10 @@ fn renders_all_eight_public_legacy_flowchart_kinds() {
             "missing rendered flowchart kind {key}"
         );
     }
-    assert!(output.svg.contains("<line"), "side-bars must emit the two inner bars");
+    assert!(
+        output.svg.contains("<line"),
+        "side-bars must emit the two inner bars"
+    );
     assert!(output.svg.contains("rx=\"8\" ry=\"8\""));
     assert!(output.svg.contains("rx=\"4\" ry=\"4\""));
     assert!(output.svg.contains("rx=\"2\" ry=\"2\""));
@@ -183,7 +187,8 @@ fn unknown_flowchart_code_remains_explicitly_unsupported() {
         style,
     );
     let plan = build_page_plan(&document, page_id, RenderPlanOptions::default()).unwrap();
-    let output = render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
+    let output =
+        render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
 
     assert_eq!(output.rendered_elements, 0);
     assert_eq!(output.skipped_elements, 1);
@@ -212,7 +217,8 @@ fn flowchart_insertion_preserves_render_plan_z_order() {
         style,
     );
     let plan = build_page_plan(&document, page_id, RenderPlanOptions::default()).unwrap();
-    let output = render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
+    let output =
+        render_plan_to_svg(&document, page_id, &plan, SvgRenderOptions::default()).unwrap();
 
     let before_pos = output.svg.find(&before_id.0.to_string()).unwrap();
     let flowchart_pos = output.svg.find(&flowchart_id.0.to_string()).unwrap();
