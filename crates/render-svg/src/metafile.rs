@@ -5,14 +5,9 @@ use render_plan::RenderPlan;
 
 use super::{SvgDiagnostic, SvgRenderOutput};
 
-const LEGACY_METAFILE_MEDIA_TYPE: &str =
-    "application/vnd.diagramdesigner-next.windows-metafile";
-const SUPPORTED_RENDITION_MEDIA_TYPES: [&str; 4] = [
-    "image/png",
-    "image/jpeg",
-    "image/webp",
-    "image/svg+xml",
-];
+const LEGACY_METAFILE_MEDIA_TYPE: &str = "application/vnd.diagramdesigner-next.windows-metafile";
+const SUPPORTED_RENDITION_MEDIA_TYPES: [&str; 4] =
+    ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
 
 /// Renderer-local, disposable web rendition of one preserved legacy metafile asset.
 ///
