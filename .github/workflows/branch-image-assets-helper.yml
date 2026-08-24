@@ -23,7 +23,9 @@ jobs:
           toolchain: 1.85.0
           components: rustfmt
       - name: Wire raster image support into production facade
-        run: python scripts/phase-2-integrate-image-assets.py
+        run: |
+          python scripts/phase-2-integrate-image-assets.py
+          python scripts/phase-2-image-assets-fix.py
       - name: Format workspace
         run: cargo fmt --all
       - name: Test raster image renderer
@@ -36,6 +38,7 @@ jobs:
           set -euo pipefail
           rm .github/workflows/branch-image-assets-helper.yml
           rm scripts/phase-2-integrate-image-assets.py
+          rm scripts/phase-2-image-assets-fix.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
