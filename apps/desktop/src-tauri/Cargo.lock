@@ -2459,6 +2459,7 @@ dependencies = [
 name = "render-svg"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "next-domain",
  "render-plan",
  "thiserror 2.0.20",
