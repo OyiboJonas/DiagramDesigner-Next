@@ -214,7 +214,8 @@ fn fidelity_document() -> (Document, PageId) {
     deferred_label.text = Some(TextBlock {
         content: RichTextDocument {
             tokens: vec![RichTextToken::Text {
-                text: "Arrow marker + polygon are intentionally diagnostic/deferred".to_owned(),
+                text: "Arrow marker and polygon are rendered by the Phase-2 production facade"
+                    .to_owned(),
                 style: TextStyle {
                     font_size_pt: Some(8),
                     ..TextStyle::default()
@@ -232,7 +233,7 @@ fn fidelity_document() -> (Document, PageId) {
 
     let polygon = element(
         polygon_id,
-        "Unsupported polygon sentinel",
+        "Rendered polygon sentinel",
         Rect {
             x: 252.0,
             y: 188.0,
