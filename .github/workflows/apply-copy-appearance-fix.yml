@@ -1,0 +1,41 @@
+name: Apply copy appearance fix
+
+on:
+  push:
+    branches:
+      - desktop-copy-paste-duplicate
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-copy-paste-duplicate
+          fetch-depth: 0
+      - name: Apply dedicated appearance copy fix
+        run: python scripts/fix-copy-appearance.py
+      - name: Format
+        run: cargo fmt --all
+      - name: Validate app core
+        run: |
+          cargo clippy --locked --manifest-path crates/app-core/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path crates/app-core/Cargo.toml
+      - name: Validate frontend
+        run: |
+          node --test web/editor-interaction/app-shortcuts.test.mjs
+          node --check apps/desktop/ui/app.js
+      - name: Validate diff
+        run: git diff --check
+      - name: Commit product fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/app-core/src/lib.rs apps/desktop/src-tauri/src/lib.rs apps/desktop/src-tauri/src/clipboard.rs
+          git commit -m "Editor: isolate copied dedicated appearance styles"
+          git push origin HEAD:desktop-copy-paste-duplicate
