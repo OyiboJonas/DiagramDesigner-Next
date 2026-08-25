@@ -1,0 +1,31 @@
+name: Format copy desktop
+
+on:
+  push:
+    branches:
+      - desktop-copy-paste-duplicate
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-copy-paste-duplicate
+          fetch-depth: 0
+      - name: Apply desktop rustfmt
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Verify diff
+        run: git diff --check
+      - name: Commit formatting
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/desktop/src-tauri/src/lib.rs apps/desktop/src-tauri/src/clipboard.rs
+          git commit -m "Style: format desktop clipboard changes"
+          git push origin HEAD:desktop-copy-paste-duplicate
