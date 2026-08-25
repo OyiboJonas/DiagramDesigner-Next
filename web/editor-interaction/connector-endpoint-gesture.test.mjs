@@ -132,11 +132,11 @@ test("nearest eligible port becomes both preview position and durable connection
   });
   beginEndpointDrag(drag);
 
-  const preview = drag.update({ pointerId: 7, screenPoint: { xPx: 52, yPx: 50 } });
+  const preview = drag.update({ pointerId: 7, screenPoint: { xPx: 51, yPx: 50 } });
   assert.deepEqual(preview.positionMm, { x: 5, y: 5 });
   assert.deepEqual(preview.connection, { elementId: "shape-a", portId: "port-a" });
 
-  const commit = drag.finish({ pointerId: 7, screenPoint: { xPx: 52, yPx: 50 } });
+  const commit = drag.finish({ pointerId: 7, screenPoint: { xPx: 51, yPx: 50 } });
   assert.deepEqual(commit, {
     kind: "set-connector-endpoint",
     elementId: "connector-a",
