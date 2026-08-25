@@ -1,0 +1,39 @@
+name: Apply copy paste duplicate
+
+on:
+  push:
+    branches:
+      - desktop-copy-paste-duplicate
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-copy-paste-duplicate
+          fetch-depth: 0
+      - name: Apply structured clipboard patch
+        run: python scripts/apply-copy-paste-duplicate.py
+      - name: Format Rust changes
+        run: |
+          cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+          cargo fmt --manifest-path crates/app-core/Cargo.toml
+      - name: Validate shortcut policy
+        run: node --test web/editor-interaction/app-shortcuts.test.mjs
+      - name: Validate frontend syntax
+        run: node --check apps/desktop/ui/app.js
+      - name: Validate patch hygiene
+        run: git diff --check
+      - name: Commit product changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/app-core/src/lib.rs apps/desktop/src-tauri/src/lib.rs apps/desktop/src-tauri/src/clipboard.rs apps/desktop/ui/index.html apps/desktop/ui/app.js apps/desktop/ui/editor-interaction/app-shortcuts.mjs web/editor-interaction/app-shortcuts.test.mjs
+          git commit -m "Editor: add copy paste and duplicate"
+          git push origin HEAD:desktop-copy-paste-duplicate
