@@ -27,16 +27,11 @@ jobs:
         run: node --check apps/desktop/ui/app.js
       - name: Validate patch hygiene
         run: git diff --check
-      - name: Remove temporary preparation files
-        shell: bash
-        run: |
-          rm scripts/prepare-alpha-readiness.py
-          rm .github/workflows/prepare-alpha-readiness.yml
       - name: Commit applied alpha readiness changes
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add README.md .github/workflows/windows-preview.yml apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/Cargo.lock apps/desktop/src-tauri/tauri.conf.json apps/desktop/src-tauri/src/lib.rs apps/desktop/ui/index.html apps/desktop/ui/app.js
           git commit -m "Alpha: apply 0.1 readiness"
           git push origin HEAD:alpha-0.1-readiness-apply
