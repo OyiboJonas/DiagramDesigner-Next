@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use next_domain::{
-    Artifact, Color, Connection, Connector, Document, Element, ElementId, ElementKind, Endpoint,
-    Layer, LayerId, NextArtifact, Page, PageId, Point, PortId, Rect, Scene, Size, StyleId,
-    TextBlock, ValidationReport,
+    Artifact, Color, Connection, Connector, Document, Element, ElementId, ElementKind,
+    ElementStyle, Endpoint, FillStyle, Layer, LayerId, NextArtifact, Page, PageId, Point, PortId,
+    Rect, Scene, Size, StrokeStyle, StyleId, TextBlock, ValidationReport,
 };
 use thiserror::Error;
 
@@ -129,6 +129,15 @@ pub enum EditCommand {
     SetElementStyle {
         element_ids: Vec<ElementId>,
         style_id: Option<StyleId>,
+    },
+    /// Replace the visual appearance of one element with an element-owned style.
+    /// The deterministic style ID prevents repeated edits from accumulating style records
+    /// and guarantees that imported/shared style records are never mutated in place.
+    SetElementAppearance {
+        element_id: ElementId,
+        stroke: Option<StrokeStyle>,
+        fill: Option<FillStyle>,
+        text_color: Option<Color>,
     },
     SetText {
         element_id: ElementId,
@@ -384,6 +393,10 @@ pub enum EditorError {
     LayerLocked(LayerId),
     #[error("style {0:?} does not exist")]
     StyleNotFound(StyleId),
+    #[error("appearance contains an invalid stroke width")]
+    InvalidAppearance,
+    #[error("element-owned appearance style {0:?} collides with existing document state")]
+    AppearanceStyleCollision(StyleId),
     #[error("text layout contains a non-finite or negative margin")]
     InvalidTextLayout,
     #[error("command contains duplicate element {0:?}")]
@@ -495,6 +508,12 @@ enum UndoStep {
     },
     SetElementStyles {
         previous: Vec<(ElementId, Option<StyleId>)>,
+    },
+    RestoreElementAppearance {
+        element_id: ElementId,
+        previous_style_id: Option<StyleId>,
+        dedicated_style_id: StyleId,
+        previous_dedicated_style: Option<ElementStyle>,
     },
     SetText {
         element_id: ElementId,
@@ -1042,6 +1061,12 @@ fn apply_command(
             element_ids,
             style_id,
         } => apply_set_element_style(document, element_ids, *style_id),
+        EditCommand::SetElementAppearance {
+            element_id,
+            stroke,
+            fill,
+            text_color,
+        } => apply_set_element_appearance(document, *element_id, stroke, fill, *text_color),
         EditCommand::SetText { element_id, text } => apply_set_text(document, *element_id, text),
         EditCommand::GroupElements {
             group_id,
@@ -1454,6 +1479,80 @@ fn apply_set_element_style(
     Ok(Some(AppliedCommand {
         undo: UndoStep::SetElementStyles { previous },
         structural: false,
+    }))
+}
+
+fn apply_set_element_appearance(
+    document: &mut Document,
+    element_id: ElementId,
+    stroke: &Option<StrokeStyle>,
+    fill: &Option<FillStyle>,
+    text_color: Option<Color>,
+) -> Result<Option<AppliedCommand>, EditorError> {
+    if stroke
+        .as_ref()
+        .is_some_and(|stroke| !stroke.width_mm.is_finite() || stroke.width_mm <= 0.0)
+    {
+        return Err(EditorError::InvalidAppearance);
+    }
+    ensure_element_editable(document, element_id)?;
+
+    let dedicated_style_id = StyleId::v5(element_id.0, "diagramdesigner-next:element-appearance");
+    let previous_style_id = find_element(document, element_id)
+        .ok_or(EditorError::ElementNotFound(element_id))?
+        .style_id;
+    let previous_dedicated_style = document
+        .styles
+        .iter()
+        .find(|style| style.id == dedicated_style_id)
+        .cloned();
+
+    let referenced_by_other =
+        all_layers(document).any(|layer| {
+            layer.scene.elements.iter().any(|element| {
+                element.id != element_id && element.style_id == Some(dedicated_style_id)
+            })
+        });
+    if referenced_by_other
+        || (previous_dedicated_style.is_some() && previous_style_id != Some(dedicated_style_id))
+    {
+        return Err(EditorError::AppearanceStyleCollision(dedicated_style_id));
+    }
+
+    let next_style = ElementStyle {
+        id: dedicated_style_id,
+        stroke: stroke.clone(),
+        fill: fill.clone(),
+        text_color,
+    };
+    if previous_style_id == Some(dedicated_style_id)
+        && previous_dedicated_style.as_ref() == Some(&next_style)
+    {
+        return Ok(None);
+    }
+
+    if let Some(existing) = document
+        .styles
+        .iter_mut()
+        .find(|style| style.id == dedicated_style_id)
+    {
+        *existing = next_style;
+    } else {
+        document.styles.push(next_style);
+    }
+    find_element_mut(document, element_id)
+        .ok_or(EditorError::HistoryInvariantViolation)?
+        .style_id = Some(dedicated_style_id);
+
+    Ok(Some(AppliedCommand {
+        undo: UndoStep::RestoreElementAppearance {
+            element_id,
+            previous_style_id,
+            dedicated_style_id,
+            previous_dedicated_style,
+        },
+        // The command creates a style reference and therefore participates in domain validation.
+        structural: true,
     }))
 }
 
@@ -1942,6 +2041,31 @@ fn apply_undo_step(document: &mut Document, step: &UndoStep) -> Result<(), Edito
                 let element = find_element_mut(document, *element_id)
                     .ok_or(EditorError::HistoryInvariantViolation)?;
                 element.style_id = *style_id;
+            }
+        }
+        UndoStep::RestoreElementAppearance {
+            element_id,
+            previous_style_id,
+            dedicated_style_id,
+            previous_dedicated_style,
+        } => {
+            find_element_mut(document, *element_id)
+                .ok_or(EditorError::HistoryInvariantViolation)?
+                .style_id = *previous_style_id;
+            if let Some(previous) = previous_dedicated_style {
+                if let Some(existing) = document
+                    .styles
+                    .iter_mut()
+                    .find(|style| style.id == *dedicated_style_id)
+                {
+                    *existing = previous.clone();
+                } else {
+                    document.styles.push(previous.clone());
+                }
+            } else {
+                document
+                    .styles
+                    .retain(|style| style.id != *dedicated_style_id);
             }
         }
         UndoStep::SetText { element_id, text } => {
@@ -2955,6 +3079,88 @@ mod tests {
             side,
         )
         .clone()
+    }
+
+    #[test]
+    fn appearance_edit_uses_element_owned_style_and_is_one_undoable_step() {
+        let (base, first, second, _, _) = fixture(false);
+        let shared = StyleId::new();
+        let mut document = base.document().clone();
+        document.styles.push(ElementStyle {
+            id: shared,
+            stroke: Some(StrokeStyle {
+                width_mm: 0.4,
+                color: Color::SystemPalette { index: 7 },
+            }),
+            fill: None,
+            text_color: None,
+        });
+        find_element_mut(&mut document, first).unwrap().style_id = Some(shared);
+        find_element_mut(&mut document, second).unwrap().style_id = Some(shared);
+        let mut session = EditorSession::from_artifact(NextArtifact::document(document)).unwrap();
+        let before = session.current_history_state();
+
+        assert!(
+            session
+                .execute(EditCommand::SetElementAppearance {
+                    element_id: first,
+                    stroke: Some(StrokeStyle {
+                        width_mm: 0.8,
+                        color: Color::Rgba {
+                            r: 10,
+                            g: 20,
+                            b: 30,
+                            a: 255
+                        },
+                    }),
+                    fill: Some(FillStyle {
+                        color: Color::Rgba {
+                            r: 240,
+                            g: 230,
+                            b: 220,
+                            a: 255
+                        },
+                        gradient: None,
+                    }),
+                    text_color: None,
+                })
+                .unwrap()
+        );
+        let after = session.current_history_state();
+        assert_ne!(after, before);
+        let dedicated = style_ref(&session, first).unwrap();
+        assert_ne!(dedicated, shared);
+        assert_eq!(style_ref(&session, second), Some(shared));
+        assert_eq!(session.document().styles.len(), 2);
+        assert_eq!(
+            session
+                .document()
+                .styles
+                .iter()
+                .find(|style| style.id == shared)
+                .unwrap()
+                .stroke
+                .as_ref()
+                .unwrap()
+                .color,
+            Color::SystemPalette { index: 7 }
+        );
+
+        assert!(session.undo().unwrap());
+        assert_eq!(session.current_history_state(), before);
+        assert_eq!(style_ref(&session, first), Some(shared));
+        assert!(
+            session
+                .document()
+                .styles
+                .iter()
+                .all(|style| style.id != dedicated)
+        );
+
+        assert!(session.redo().unwrap());
+        assert_eq!(session.current_history_state(), after);
+        assert_eq!(style_ref(&session, first), Some(dedicated));
+        assert_eq!(session.document().styles.len(), 2);
     }
 
     #[test]
