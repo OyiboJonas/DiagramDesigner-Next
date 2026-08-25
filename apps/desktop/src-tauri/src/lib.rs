@@ -1,3 +1,4 @@
+mod clipboard;
 mod legacy_import;
 mod renderer_benchmark_evidence;
 
@@ -68,14 +69,21 @@ impl DesktopDocument {
     }
 }
 
+struct DesktopClipboard {
+    payload: clipboard::ClipboardPayload,
+    paste_count: u32,
+}
+
 struct DesktopState {
     document: Mutex<DesktopDocument>,
+    clipboard: Mutex<Option<DesktopClipboard>>,
 }
 
 impl DesktopState {
     fn new() -> Result<Self, CommandError> {
         Ok(Self {
             document: Mutex::new(DesktopDocument::blank()?),
+            clipboard: Mutex::new(None),
         })
     }
 }
@@ -183,6 +191,12 @@ struct RecoveryStatusDto {
 struct RecoverySyncDto {
     action: &'static str,
     state: DocumentStateDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClipboardCopyDto {
+    count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -1157,6 +1171,109 @@ fn delete_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultD
 }
 
 #[tauri::command]
+fn copy_selection(state: State<'_, DesktopState>) -> Result<ClipboardCopyDto, CommandError> {
+    let document = lock_document(&state)?;
+    let selected: Vec<_> = document
+        .session
+        .session()
+        .selection()
+        .iter()
+        .copied()
+        .collect();
+    let payload = clipboard::capture_selection(document.session.session().document(), &selected)
+        .map_err(|error| CommandError::new("clipboard_copy_failed", error.to_string()))?;
+    let count = payload.len();
+    let mut application_clipboard = state.clipboard.lock().map_err(|_| {
+        CommandError::new(
+            "clipboard_lock_failed",
+            "The application clipboard lock is poisoned.",
+        )
+    })?;
+    *application_clipboard = Some(DesktopClipboard {
+        payload,
+        paste_count: 0,
+    });
+    Ok(ClipboardCopyDto { count })
+}
+
+#[tauri::command]
+fn paste_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let target = document.session.session().active_layer().ok_or_else(|| {
+        CommandError::new(
+            "clipboard_no_active_layer",
+            "Choose an active layer before pasting elements.",
+        )
+    })?;
+    let mut application_clipboard = state.clipboard.lock().map_err(|_| {
+        CommandError::new(
+            "clipboard_lock_failed",
+            "The application clipboard lock is poisoned.",
+        )
+    })?;
+    let clipboard = application_clipboard
+        .as_mut()
+        .ok_or_else(|| CommandError::new("clipboard_empty", "Copy a selection before pasting."))?;
+    let next_step = clipboard.paste_count.saturating_add(1).max(1);
+    let instantiated = clipboard.payload.instantiate(next_step);
+    let selected = instantiated.element_ids.clone();
+    document
+        .session
+        .create_elements(target, instantiated.elements)
+        .map_err(|error| CommandError::new("clipboard_paste_failed", error.to_string()))?;
+    document
+        .session
+        .set_selection(selected)
+        .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
+    clipboard.paste_count = next_step;
+    Ok(element_edit_result_dto(&document))
+}
+
+#[tauri::command]
+fn duplicate_selection(
+    state: State<'_, DesktopState>,
+) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let target = document.session.session().active_layer().ok_or_else(|| {
+        CommandError::new(
+            "duplicate_no_active_layer",
+            "Choose an active layer before duplicating elements.",
+        )
+    })?;
+    let selected: Vec<_> = document
+        .session
+        .session()
+        .selection()
+        .iter()
+        .copied()
+        .collect();
+    let payload = clipboard::capture_selection(document.session.session().document(), &selected)
+        .map_err(|error| CommandError::new("duplicate_failed", error.to_string()))?;
+    let instantiated = payload.instantiate(1);
+    let duplicated_ids = instantiated.element_ids.clone();
+    document
+        .session
+        .create_elements(target, instantiated.elements)
+        .map_err(|error| CommandError::new("duplicate_failed", error.to_string()))?;
+    document
+        .session
+        .set_selection(duplicated_ids)
+        .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
+    Ok(element_edit_result_dto(&document))
+}
+
+fn clear_application_clipboard(state: &State<'_, DesktopState>) -> Result<(), CommandError> {
+    let mut application_clipboard = state.clipboard.lock().map_err(|_| {
+        CommandError::new(
+            "clipboard_lock_failed",
+            "The application clipboard lock is poisoned.",
+        )
+    })?;
+    *application_clipboard = None;
+    Ok(())
+}
+
+#[tauri::command]
 fn update_element_properties(
     request: UpdateElementPropertiesRequest,
     state: State<'_, DesktopState>,
@@ -1318,6 +1435,7 @@ fn new_document(state: State<'_, DesktopState>) -> Result<DocumentActionDto, Com
     let mut document = lock_document(&state)?;
     reject_if_dirty(&document)?;
     *document = DesktopDocument::blank()?;
+    clear_application_clipboard(&state)?;
     Ok(DocumentActionDto {
         cancelled: false,
         state: document_state_dto(&document),
@@ -1388,6 +1506,7 @@ async fn open_document(
         imported_dirty,
         recovered_dirty: false,
     };
+    clear_application_clipboard(&state)?;
 
     Ok(DocumentActionDto {
         cancelled: false,
@@ -1518,6 +1637,7 @@ fn restore_recovery(
         imported_dirty: false,
         recovered_dirty: true,
     };
+    clear_application_clipboard(&state)?;
 
     Ok(DocumentActionDto {
         cancelled: false,
@@ -2299,6 +2419,9 @@ pub fn run() {
             candidate_page_presentation,
             set_selection,
             selection_properties,
+            copy_selection,
+            paste_selection,
+            duplicate_selection,
             create_basic_element,
             create_connector,
             set_connector_endpoint,

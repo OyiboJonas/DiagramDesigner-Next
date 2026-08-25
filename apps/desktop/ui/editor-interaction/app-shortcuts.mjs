@@ -35,6 +35,15 @@ export function resolveApplicationShortcut(
   if (command && normalized === 'y' && !shiftKey) {
     return 'redo';
   }
+  if (command && !shiftKey && normalized === 'c') {
+    return 'copy-selection';
+  }
+  if (command && !shiftKey && normalized === 'v') {
+    return 'paste-selection';
+  }
+  if (command && !shiftKey && normalized === 'd') {
+    return 'duplicate-selection';
+  }
   if (!command && !shiftKey && (key === 'Delete' || key === 'Backspace')) {
     return 'delete-selection';
   }

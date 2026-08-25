@@ -20,6 +20,15 @@ test('standard undo and redo variants resolve outside text editing', () => {
   assert.equal(resolveApplicationShortcut({ key: 'Y', metaKey: true }), 'redo');
 });
 
+test('clipboard productivity shortcuts resolve outside text editing', () => {
+  assert.equal(resolveApplicationShortcut({ key: 'c', ctrlKey: true }), 'copy-selection');
+  assert.equal(resolveApplicationShortcut({ key: 'V', metaKey: true }), 'paste-selection');
+  assert.equal(resolveApplicationShortcut({ key: 'd', ctrlKey: true }), 'duplicate-selection');
+  assert.equal(resolveApplicationShortcut({ key: 'c', ctrlKey: true }, { textEditing: true }), null);
+  assert.equal(resolveApplicationShortcut({ key: 'v', metaKey: true }, { textEditing: true }), null);
+  assert.equal(resolveApplicationShortcut({ key: 'd', ctrlKey: true }, { textEditing: true }), null);
+});
+
 test('delete shortcuts require no command or shift modifier', () => {
   assert.equal(resolveApplicationShortcut({ key: 'Delete' }), 'delete-selection');
   assert.equal(resolveApplicationShortcut({ key: 'Backspace' }), 'delete-selection');

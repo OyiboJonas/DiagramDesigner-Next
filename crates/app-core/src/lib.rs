@@ -265,6 +265,26 @@ impl ApplicationSession {
         })
     }
 
+    /// Create several top-level elements as one semantic history step.
+    ///
+    /// Clipboard/paste callers prepare fresh stable identities before crossing this
+    /// boundary. editor-core still owns structural validation, atomic rollback and
+    /// undo/redo for the complete transaction.
+    pub fn create_elements(
+        &mut self,
+        target: LayerTarget,
+        elements: Vec<Element>,
+    ) -> Result<bool, ApplicationError> {
+        let commands = elements
+            .into_iter()
+            .map(|element| EditCommand::CreateElement {
+                target,
+                element,
+                z_index: None,
+            });
+        self.execute_edit_transaction(EditTransaction::new(commands))
+    }
+
     /// Commit one connector endpoint as either a free point or a durable
     /// target-port reference. Connected coordinates are resolved by editor-core.
     pub fn set_connector_endpoint(
