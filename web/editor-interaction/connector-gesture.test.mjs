@@ -24,6 +24,8 @@ test('connector gesture keeps pointer updates transient and emits one semantic c
     connectorKind: 'straight',
     startMm: { x: 10, y: 10 },
     endMm: { x: 10, y: 10 },
+    startConnection: null,
+    endConnection: null,
   });
 
   const update = controller.update({
@@ -42,6 +44,8 @@ test('connector gesture keeps pointer updates transient and emits one semantic c
     connectorKind: 'straight',
     startMm: { x: 10, y: 10 },
     endMm: { x: 30, y: 25 },
+    startConnection: null,
+    endConnection: null,
   });
   assert.equal(controller.isActive, false);
   assert.equal(controller.finish({ pointerId: 7, screenPoint: { xPx: 60, yPx: 100 } }), null);
@@ -100,4 +104,58 @@ test('connector kind validation rejects unsupported frontend tool state', () => 
   assert.equal(normalizeConnectorKind('straight'), 'straight');
   assert.equal(normalizeConnectorKind('orthogonal'), 'orthogonal');
   assert.throws(() => normalizeConnectorKind('curve'), /unsupported connector kind/);
+});
+
+
+test('connector gesture can resolve both creation endpoints to canonical ports in one intent', () => {
+  const controller = new ConnectorGestureController({
+    screenToDocument: ({ xPx, yPx }) => ({ x: xPx, y: yPx }),
+    resolvePortTarget: ({ side }) =>
+      side === 'start'
+        ? { elementId: 'shape-a', portId: 'port-right', positionMm: { x: 20, y: 30 } }
+        : { elementId: 'shape-b', portId: 'port-left', positionMm: { x: 80, y: 40 } },
+  });
+
+  const begin = controller.begin({
+    pointerId: 9,
+    screenPoint: { xPx: 18, yPx: 31 },
+    connectorKind: 'straight',
+  });
+  assert.deepEqual(begin.startMm, { x: 20, y: 30 });
+  assert.deepEqual(begin.startConnection, { elementId: 'shape-a', portId: 'port-right' });
+
+  const commit = controller.finish({
+    pointerId: 9,
+    screenPoint: { xPx: 82, yPx: 39 },
+  });
+  assert.deepEqual(commit, {
+    kind: 'create-connector',
+    connectorKind: 'straight',
+    startMm: { x: 20, y: 30 },
+    endMm: { x: 80, y: 40 },
+    startConnection: { elementId: 'shape-a', portId: 'port-right' },
+    endConnection: { elementId: 'shape-b', portId: 'port-left' },
+  });
+});
+
+test('connector gesture keeps an endpoint free when its port resolver has no hit', () => {
+  const controller = new ConnectorGestureController({
+    screenToDocument: ({ xPx, yPx }) => ({ x: xPx, y: yPx }),
+    resolvePortTarget: ({ side }) =>
+      side === 'start'
+        ? { elementId: 'shape-a', portId: 'port-right', positionMm: { x: 20, y: 30 } }
+        : null,
+  });
+  controller.begin({
+    pointerId: 10,
+    screenPoint: { xPx: 20, yPx: 30 },
+    connectorKind: 'orthogonal',
+  });
+  const commit = controller.finish({
+    pointerId: 10,
+    screenPoint: { xPx: 70, yPx: 75 },
+  });
+  assert.deepEqual(commit.startConnection, { elementId: 'shape-a', portId: 'port-right' });
+  assert.equal(commit.endConnection, null);
+  assert.deepEqual(commit.endMm, { x: 70, y: 75 });
 });

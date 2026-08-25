@@ -240,6 +240,8 @@ struct CreateConnectorRequest {
     kind: ConnectorKind,
     start_mm: Point,
     end_mm: Point,
+    start_connection: Option<Connection>,
+    end_connection: Option<Connection>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -959,8 +961,20 @@ fn create_connector(
         (target, page.size_mm)
     };
 
-    let start_mm = clamp_connector_point(request.start_mm, page_size)?;
-    let end_mm = clamp_connector_point(request.end_mm, page_size)?;
+    let ports = document
+        .session
+        .active_page_layer_ports()
+        .map_err(|error| CommandError::new("connector_ports_failed", error.to_string()))?;
+    let start = connector_creation_endpoint(
+        request.start_mm,
+        request.start_connection,
+        page_size,
+        &ports,
+    )?;
+    let end =
+        connector_creation_endpoint(request.end_mm, request.end_connection, page_size, &ports)?;
+    let start_mm = start.position_mm;
+    let end_mm = end.position_mm;
     let distance_mm = (end_mm.x - start_mm.x).hypot(end_mm.y - start_mm.y);
     if distance_mm < 0.5 {
         return Err(CommandError::new(
@@ -971,14 +985,8 @@ fn create_connector(
 
     let element_id = ElementId::new();
     let connector = Connector {
-        start: Endpoint {
-            position_mm: start_mm,
-            connection: None,
-        },
-        end: Endpoint {
-            position_mm: end_mm,
-            connection: None,
-        },
+        start,
+        end,
         start_marker: MarkerStyle::None,
         end_marker: MarkerStyle::None,
         line_style: LineStyle::Solid,
@@ -1710,6 +1718,33 @@ fn clamp_connector_point(point: Point, page_size: Size) -> Result<Point, Command
     Ok(Point {
         x: point.x.clamp(0.0, page_size.width),
         y: point.y.clamp(0.0, page_size.height),
+    })
+}
+
+fn connector_creation_endpoint(
+    position_mm: Point,
+    connection: Option<Connection>,
+    page_size: Size,
+    ports: &[app_core::ConnectorPortPosition],
+) -> Result<Endpoint, CommandError> {
+    let Some(connection) = connection else {
+        return Ok(Endpoint {
+            position_mm: clamp_connector_point(position_mm, page_size)?,
+            connection: None,
+        });
+    };
+    let port = ports
+        .iter()
+        .find(|port| port.element_id == connection.element_id && port.port_id == connection.port_id)
+        .ok_or_else(|| {
+            CommandError::new(
+                "connector_port_missing",
+                "The requested connector port is no longer available on the active editable layer.",
+            )
+        })?;
+    Ok(Endpoint {
+        position_mm: port.position_mm,
+        connection: Some(connection),
     })
 }
 

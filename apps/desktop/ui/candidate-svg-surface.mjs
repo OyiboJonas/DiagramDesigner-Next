@@ -22,6 +22,7 @@ const SELECTED_ATTRIBUTE = "data-ddn-selected";
 const SNAP_GUIDES_ATTRIBUTE = "data-ddn-snap-guides";
 const SNAP_GUIDE_ATTRIBUTE = "data-ddn-snap-guide";
 const CONNECTOR_PREVIEW_ATTRIBUTE = "data-ddn-connector-preview";
+const CONNECTOR_TOOL_PORTS_ATTRIBUTE = "data-ddn-connector-tool-ports";
 const CONNECTOR_ENDPOINT_EDITOR_ATTRIBUTE = "data-ddn-connector-endpoint-editor";
 const CONNECTOR_ENDPOINT_HANDLE_ATTRIBUTE = "data-ddn-connector-endpoint-handle";
 const CONNECTOR_ENDPOINT_PREVIEW_ATTRIBUTE = "data-ddn-connector-endpoint-preview";
@@ -216,6 +217,16 @@ export function createCandidateSvgSurface(
     connectorController = new ConnectorGestureController({
       screenToDocument,
       minimumLengthMm: 0.5,
+      resolvePortTarget: ({ pointMm }) => {
+        if (!presentationGeometry || !interactionSettings.snappingEnabled) {
+          return null;
+        }
+        return nearestPortTarget(
+          pointMm,
+          presentationGeometry.portTargets,
+          endpointSnapThresholdMm(svg, interactionSettings.snapThresholdPx),
+        );
+      },
     });
     endpointController = new ConnectorEndpointGestureController({
       screenToDocument,
@@ -346,6 +357,7 @@ export function createCandidateSvgSurface(
       removeMoveOverlay(svg);
       removeSnapGuides(svg);
       removeConnectorPreview(svg);
+      removeConnectorToolPorts(svg);
       removeConnectorEndpointPreview(svg);
       removeConnectorEndpointEditor(svg);
       connectorController = null;
@@ -395,6 +407,10 @@ export function createCandidateSvgSurface(
       applyGridStyle(host, presentationGeometry, interactionSettings);
       bindPointerInteraction();
       applySelection(previousSelection, { notify: false });
+      renderConnectorToolPorts(
+        svg,
+        connectorTool !== null && interactionSettings.snappingEnabled ? presentationGeometry : null,
+      );
     },
 
     setConnectorTool(kind) {
@@ -410,6 +426,10 @@ export function createCandidateSvgSurface(
       } else {
         host.setAttribute("data-connector-tool", next);
       }
+      renderConnectorToolPorts(
+        svg,
+        next !== null && interactionSettings.snappingEnabled ? presentationGeometry : null,
+      );
       renderConnectorEndpointEditor(svg, next === null ? endpointSelection : null, presentationGeometry);
       return connectorTool;
     },
@@ -441,6 +461,10 @@ export function createCandidateSvgSurface(
       interactionSettings = normalizeInteractionSettings(interactionSettings, settings);
       applyGridStyle(host, presentationGeometry, interactionSettings);
       removeSnapGuides(svg);
+      renderConnectorToolPorts(
+        svg,
+        connectorTool !== null && interactionSettings.snappingEnabled ? presentationGeometry : null,
+      );
       return Object.freeze({ ...interactionSettings });
     },
 
@@ -458,6 +482,7 @@ export function createCandidateSvgSurface(
       removeMoveOverlay(svg);
       removeSnapGuides(svg);
       removeConnectorPreview(svg);
+      removeConnectorToolPorts(svg);
       removeConnectorEndpointPreview(svg);
       removeConnectorEndpointEditor(svg);
       connectorController = null;
@@ -489,6 +514,7 @@ export function createCandidateSvgSurface(
       removeMoveOverlay(svg);
       removeSnapGuides(svg);
       removeConnectorPreview(svg);
+      removeConnectorToolPorts(svg);
       removeConnectorEndpointPreview(svg);
       removeConnectorEndpointEditor(svg);
       connectorController = null;
@@ -566,6 +592,9 @@ function removeConnectorPreview(svg) {
   for (const preview of svg.querySelectorAll(`[${CONNECTOR_PREVIEW_ATTRIBUTE}]`)) {
     preview.remove();
   }
+  for (const port of svg.querySelectorAll(`[${CONNECTOR_PORT_SNAPPED_ATTRIBUTE}]`)) {
+    port.removeAttribute(CONNECTOR_PORT_SNAPPED_ATTRIBUTE);
+  }
 }
 
 function renderConnectorPreview(svg, preview) {
@@ -595,6 +624,45 @@ function renderConnectorPreview(svg, preview) {
     element.setAttribute("y2", formatFinite(end?.y));
   }
   svg.append(element);
+  if (preview.startConnection) {
+    markSnappedPort(svg, preview.startConnection);
+  }
+  if (preview.endConnection) {
+    markSnappedPort(svg, preview.endConnection);
+  }
+}
+
+function removeConnectorToolPorts(svg) {
+  if (!svg) {
+    return;
+  }
+  for (const ports of svg.querySelectorAll(`[${CONNECTOR_TOOL_PORTS_ATTRIBUTE}]`)) {
+    ports.remove();
+  }
+}
+
+function renderConnectorToolPorts(svg, geometry) {
+  removeConnectorToolPorts(svg);
+  if (!svg || !geometry) {
+    return;
+  }
+  const group = document.createElementNS(SVG_NS, "g");
+  group.setAttribute(CONNECTOR_TOOL_PORTS_ATTRIBUTE, "true");
+  group.setAttribute("pointer-events", "none");
+  group.setAttribute("aria-hidden", "true");
+  const radius = Math.max(endpointMmPerPx(svg) * 3.25, 0.35);
+  for (const port of geometry.portTargets) {
+    const handle = document.createElementNS(SVG_NS, "circle");
+    handle.setAttribute(CONNECTOR_PORT_HANDLE_ATTRIBUTE, "true");
+    handle.setAttribute(CONNECTOR_PORT_ELEMENT_ID_ATTRIBUTE, port.elementId);
+    handle.setAttribute(CONNECTOR_PORT_ID_ATTRIBUTE, port.portId);
+    handle.setAttribute("cx", formatFinite(port.positionMm.x));
+    handle.setAttribute("cy", formatFinite(port.positionMm.y));
+    handle.setAttribute("r", formatFinite(radius));
+    handle.setAttribute("pointer-events", "none");
+    group.append(handle);
+  }
+  svg.append(group);
 }
 
 function removeConnectorEndpointEditor(svg) {
