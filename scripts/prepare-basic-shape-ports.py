@@ -3,14 +3,14 @@ from pathlib import Path
 path = Path("apps/desktop/src-tauri/src/lib.rs")
 text = path.read_text(encoding="utf-8")
 
-old = """    Element, ElementId, ElementKind, Endpoint, Layer, LayerId, LineStyle, MarkerStyle, NextArtifact,\n    Page, PageId, Point, PortId, Rect, RichTextDocument, RichTextToken, Scene, Size, TextBlock,\n"""
-new = """    Element, ElementId, ElementKind, Endpoint, Layer, LayerId, LineStyle, MarkerStyle, NextArtifact,\n    NormalizedPoint, Page, PageId, Point, Port, PortId, Rect, RichTextDocument, RichTextToken, Scene,\n    Size, TextBlock,\n"""
+old = """    Element, ElementId, ElementKind, Endpoint, Layer, LayerId, LineStyle, MarkerStyle,\n    NextArtifact, Page, PageId, Point, PortId, Rect, RichTextDocument, RichTextToken, Scene, Size,\n    TextBlock, TextHorizontalAlignment, TextLayout, TextStyle, TextVerticalAlignment,\n"""
+new = """    Element, ElementId, ElementKind, Endpoint, Layer, LayerId, LineStyle, MarkerStyle,\n    NextArtifact, NormalizedPoint, Page, PageId, Point, Port, PortId, Rect, RichTextDocument,\n    RichTextToken, Scene, Size, TextBlock, TextHorizontalAlignment, TextLayout, TextStyle,\n    TextVerticalAlignment,\n"""
 if old not in text:
     raise SystemExit("domain import anchor missing")
 text = text.replace(old, new, 1)
 
-old = """        anchors: AnchorSet::default(),\n        ports: Vec::new(),\n        style_id: None,\n        text,\n        kind,\n"""
-new = """        anchors: AnchorSet::default(),\n        ports: default_shape_ports(),\n        style_id: None,\n        text,\n        kind,\n"""
+old = """        anchors: AnchorSet::default(),\n        ports: Vec::new(),\n        style_id: None,\n        text,\n        kind,\n        import: None,\n"""
+new = """        anchors: AnchorSet::default(),\n        ports: default_shape_ports(),\n        style_id: None,\n        text,\n        kind,\n        import: None,\n"""
 if old not in text:
     raise SystemExit("basic element ports anchor missing")
 text = text.replace(old, new, 1)
