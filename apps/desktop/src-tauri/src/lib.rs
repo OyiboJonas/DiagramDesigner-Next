@@ -16,11 +16,11 @@ use app_core::{
 use ddnx::PackageLimits;
 use editor_runtime::RecoveryPlan;
 use next_domain::{
-    AnchorSet, Connection, Connector, ConnectorLabelStyle, Document, DocumentDefaults, DocumentId,
-    Element, ElementId, ElementKind, Endpoint, Layer, LayerId, LineStyle, MarkerStyle,
-    NextArtifact, NormalizedPoint, Page, PageId, Point, Port, PortId, Rect, RichTextDocument,
-    RichTextToken, Scene, Size, TextBlock, TextHorizontalAlignment, TextLayout, TextStyle,
-    TextVerticalAlignment,
+    AnchorSet, Color, Connection, Connector, ConnectorLabelStyle, Document, DocumentDefaults,
+    DocumentId, Element, ElementId, ElementKind, Endpoint, FillStyle, Layer, LayerId, LineStyle,
+    MarkerStyle, NextArtifact, NormalizedPoint, Page, PageId, Point, Port, PortId, Rect,
+    RichTextDocument, RichTextToken, Scene, Size, StrokeStyle, TextBlock, TextHorizontalAlignment,
+    TextLayout, TextStyle, TextVerticalAlignment,
 };
 use platform_fs::{AtomicSaveError, CommitMode, DurabilityLevel, atomic_save};
 use render_plan::{RenderPlanOptions, build_page_plan};
@@ -218,6 +218,7 @@ struct MoveElementsRequest {
 #[serde(rename_all = "snake_case")]
 enum BasicElementKind {
     Rectangle,
+    Ellipse,
     Text,
 }
 
@@ -269,6 +270,32 @@ struct UpdateElementPropertiesRequest {
     text: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateElementAppearanceRequest {
+    element_id: ElementId,
+    stroke_enabled: Option<bool>,
+    stroke_color: Option<String>,
+    stroke_width_mm: Option<f64>,
+    fill_enabled: Option<bool>,
+    fill_color: Option<String>,
+    text_color: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ElementAppearanceDto {
+    stroke_applicable: bool,
+    stroke_enabled: bool,
+    stroke_color: String,
+    stroke_width_mm: f64,
+    fill_applicable: bool,
+    fill_enabled: bool,
+    fill_color: String,
+    text_color_applicable: bool,
+    text_color: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ElementEditResultDto {
@@ -294,6 +321,7 @@ struct ElementPropertiesDto {
     text: Option<String>,
     text_editable: bool,
     geometry_editable: bool,
+    appearance: ElementAppearanceDto,
     connector: Option<ConnectorPropertiesDto>,
 }
 
@@ -818,7 +846,11 @@ fn selection_properties(
             .session
             .connector_endpoints(element.id)
             .map_err(|error| CommandError::new("connector_query_failed", error.to_string()))?;
-        Some(element_properties_dto(element, connector))
+        Some(element_properties_dto(
+            element,
+            connector,
+            session.document(),
+        ))
     } else {
         None
     };
@@ -870,6 +902,7 @@ fn create_basic_element(
             },
             None,
         ),
+        BasicElementKind::Ellipse => ("Ellipse".to_owned(), 40.0, 25.0, ElementKind::Ellipse, None),
         BasicElementKind::Text => (
             "Text".to_owned(),
             60.0,
@@ -1180,6 +1213,102 @@ fn update_element_properties(
             text_update,
         )
         .map_err(|error| CommandError::new("element_properties_failed", error.to_string()))?;
+    Ok(element_edit_result_dto(&document))
+}
+
+#[tauri::command]
+fn update_element_appearance(
+    request: UpdateElementAppearanceRequest,
+    state: State<'_, DesktopState>,
+) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let (
+        stroke_applicable,
+        fill_applicable,
+        text_color_applicable,
+        mut stroke,
+        mut fill,
+        mut text_color,
+    ) = {
+        let session = document.session.session();
+        let element = find_element(session.document(), request.element_id).ok_or_else(|| {
+            CommandError::new(
+                "element_appearance_missing",
+                "The selected element no longer exists in the current document.",
+            )
+        })?;
+        let (stroke_applicable, fill_applicable, text_color_applicable) =
+            appearance_applicability(&element.kind);
+        let (stroke, fill, text_color) =
+            materialized_element_appearance(element, session.document());
+        (
+            stroke_applicable,
+            fill_applicable,
+            text_color_applicable,
+            stroke,
+            fill,
+            text_color,
+        )
+    };
+
+    if (!stroke_applicable
+        && (request.stroke_enabled.is_some()
+            || request.stroke_color.is_some()
+            || request.stroke_width_mm.is_some()))
+        || (!fill_applicable && (request.fill_enabled.is_some() || request.fill_color.is_some()))
+        || (!text_color_applicable && request.text_color.is_some())
+    {
+        return Err(CommandError::new(
+            "appearance_not_applicable",
+            "The requested appearance field does not apply to this element type.",
+        ));
+    }
+
+    if let Some(enabled) = request.stroke_enabled {
+        if enabled {
+            stroke.get_or_insert_with(default_stroke);
+        } else {
+            stroke = None;
+        }
+    }
+    if let Some(width) = request.stroke_width_mm {
+        if !width.is_finite() || width <= 0.0 {
+            return Err(CommandError::new(
+                "invalid_stroke_width",
+                "Stroke width must be a finite positive value.",
+            ));
+        }
+        stroke.get_or_insert_with(default_stroke).width_mm = width;
+    }
+    if let Some(color) = request.stroke_color.as_deref() {
+        stroke.get_or_insert_with(default_stroke).color = parse_rgb_color(color)?;
+    }
+
+    if let Some(enabled) = request.fill_enabled {
+        if enabled {
+            fill.get_or_insert_with(default_fill);
+        } else {
+            fill = None;
+        }
+    }
+    if let Some(color) = request.fill_color.as_deref() {
+        let fill = fill.get_or_insert_with(default_fill);
+        fill.color = parse_rgb_color(color)?;
+        // Choosing a flat colour explicitly replaces an imported gradient.
+        fill.gradient = None;
+    }
+    if let Some(color) = request.text_color.as_deref() {
+        text_color = Some(parse_rgb_color(color)?);
+    }
+
+    document
+        .session
+        .set_element_appearance(request.element_id, stroke, fill, text_color)
+        .map_err(|error| CommandError::new("element_appearance_failed", error.to_string()))?;
+    document
+        .session
+        .set_selection([request.element_id])
+        .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
     Ok(element_edit_result_dto(&document))
 }
 
@@ -1598,6 +1727,7 @@ fn find_element(document: &Document, element_id: ElementId) -> Option<&Element> 
 fn element_properties_dto(
     element: &Element,
     connector: Option<AppConnectorEndpoints>,
+    document: &Document,
 ) -> ElementPropertiesDto {
     let (text, text_editable) = match element.text.as_ref() {
         Some(block) => {
@@ -1615,8 +1745,126 @@ fn element_properties_dto(
         text,
         text_editable,
         geometry_editable: element_geometry_editable(&element.kind),
+        appearance: element_appearance_dto(element, document),
         connector: connector.and_then(connector_properties_dto),
     }
+}
+
+fn appearance_applicability(kind: &ElementKind) -> (bool, bool, bool) {
+    let shape = matches!(
+        kind,
+        ElementKind::Rectangle { .. }
+            | ElementKind::Ellipse
+            | ElementKind::Polygon { .. }
+            | ElementKind::Flowchart { .. }
+    );
+    let text = matches!(kind, ElementKind::Text);
+    (shape, shape, text)
+}
+
+fn materialized_element_appearance(
+    element: &Element,
+    document: &Document,
+) -> (Option<StrokeStyle>, Option<FillStyle>, Option<Color>) {
+    if let Some(style) = element
+        .style_id
+        .and_then(|style_id| document.styles.iter().find(|style| style.id == style_id))
+    {
+        return (style.stroke.clone(), style.fill.clone(), style.text_color);
+    }
+    let (stroke_applicable, _, text_applicable) = appearance_applicability(&element.kind);
+    (
+        stroke_applicable.then(default_stroke),
+        None,
+        text_applicable.then(default_black),
+    )
+}
+
+fn element_appearance_dto(element: &Element, document: &Document) -> ElementAppearanceDto {
+    let (stroke_applicable, fill_applicable, text_color_applicable) =
+        appearance_applicability(&element.kind);
+    let (stroke, fill, text_color) = materialized_element_appearance(element, document);
+    ElementAppearanceDto {
+        stroke_applicable,
+        stroke_enabled: stroke.is_some(),
+        stroke_color: color_to_hex(
+            stroke
+                .as_ref()
+                .map(|stroke| stroke.color)
+                .unwrap_or_else(default_black),
+        ),
+        stroke_width_mm: stroke
+            .as_ref()
+            .map(|stroke| stroke.width_mm)
+            .unwrap_or(0.25),
+        fill_applicable,
+        fill_enabled: fill.is_some(),
+        fill_color: color_to_hex(fill.as_ref().map(|fill| fill.color).unwrap_or(Color::Rgba {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255,
+        })),
+        text_color_applicable,
+        text_color: color_to_hex(text_color.unwrap_or_else(default_black)),
+    }
+}
+
+fn default_black() -> Color {
+    Color::Rgba {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    }
+}
+
+fn default_stroke() -> StrokeStyle {
+    StrokeStyle {
+        width_mm: 0.25,
+        color: default_black(),
+    }
+}
+
+fn default_fill() -> FillStyle {
+    FillStyle {
+        color: Color::Rgba {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255,
+        },
+        gradient: None,
+    }
+}
+
+fn color_to_hex(color: Color) -> String {
+    match color {
+        Color::Rgba { r, g, b, .. } => format!("#{r:02x}{g:02x}{b:02x}"),
+        // System colours are intentionally kept in the domain until the user changes
+        // that field. The picker shows the renderer's neutral fallback only.
+        Color::SystemPalette { .. } => "#808080".to_owned(),
+    }
+}
+
+fn parse_rgb_color(value: &str) -> Result<Color, CommandError> {
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(CommandError::new(
+            "invalid_color",
+            "Colours must use six-digit RGB notation such as #336699.",
+        ));
+    }
+    let parse = |range: std::ops::Range<usize>| {
+        u8::from_str_radix(&hex[range], 16)
+            .map_err(|_| CommandError::new("invalid_color", "Colour could not be parsed."))
+    };
+    Ok(Color::Rgba {
+        r: parse(0..2)?,
+        g: parse(2..4)?,
+        b: parse(4..6)?,
+        a: 255,
+    })
 }
 
 fn connector_properties_dto(connector: AppConnectorEndpoints) -> Option<ConnectorPropertiesDto> {
@@ -2000,6 +2248,7 @@ pub fn run() {
             set_connector_endpoint,
             delete_selection,
             update_element_properties,
+            update_element_appearance,
             new_document,
             open_document,
             save_document,

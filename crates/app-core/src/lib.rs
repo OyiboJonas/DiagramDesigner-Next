@@ -11,8 +11,8 @@ use editor_core::{
 };
 use editor_runtime::{EditorRuntime, RecoveryCheckpointKey, RecoveryPlan};
 use next_domain::{
-    Color, Connection, Element, ElementId, Layer, LayerId, NextArtifact, Page, PageId, Point,
-    PortId, Rect, Size, TextBlock,
+    Color, Connection, Element, ElementId, FillStyle, Layer, LayerId, NextArtifact, Page, PageId,
+    Point, PortId, Rect, Size, StrokeStyle, TextBlock,
 };
 use thiserror::Error;
 
@@ -363,6 +363,23 @@ impl ApplicationSession {
             transaction.push(EditCommand::SetText { element_id, text });
         }
         self.execute_edit_transaction(transaction)
+    }
+
+    /// Apply stroke/fill/text colour as one semantic history step. editor-core owns
+    /// the deterministic per-element style identity and never mutates shared styles.
+    pub fn set_element_appearance(
+        &mut self,
+        element_id: ElementId,
+        stroke: Option<StrokeStyle>,
+        fill: Option<FillStyle>,
+        text_color: Option<Color>,
+    ) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::SetElementAppearance {
+            element_id,
+            stroke,
+            fill,
+            text_color,
+        })
     }
 
     /// Switch the active page without creating a persistent history step.
@@ -949,6 +966,46 @@ mod tests {
         assert!(app.undo().unwrap());
         assert_eq!(app.session().current_history_state(), initial);
         assert!(!app.is_dirty());
+    }
+
+    #[test]
+    fn appearance_commit_is_one_application_history_step() {
+        let (artifact, element_id) = fixture();
+        let mut app = ApplicationSession::from_artifact(artifact).unwrap();
+        let before = app.session().current_history_state();
+        assert!(
+            app.set_element_appearance(
+                element_id,
+                Some(StrokeStyle {
+                    width_mm: 0.6,
+                    color: Color::Rgba {
+                        r: 12,
+                        g: 34,
+                        b: 56,
+                        a: 255
+                    },
+                }),
+                Some(FillStyle {
+                    color: Color::Rgba {
+                        r: 200,
+                        g: 210,
+                        b: 220,
+                        a: 255
+                    },
+                    gradient: None,
+                }),
+                None,
+            )
+            .unwrap()
+        );
+        let after = app.session().current_history_state();
+        assert_ne!(after, before);
+        assert!(app.is_dirty());
+        assert!(app.undo().unwrap());
+        assert_eq!(app.session().current_history_state(), before);
+        assert!(!app.is_dirty());
+        assert!(app.redo().unwrap());
+        assert_eq!(app.session().current_history_state(), after);
     }
 
     #[test]

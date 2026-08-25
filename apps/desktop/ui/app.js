@@ -13,6 +13,7 @@ const elements = {
   toggleGrid: document.querySelector('#toggle-grid'),
   toggleSnap: document.querySelector('#toggle-snap'),
   addRectangle: document.querySelector('#add-rectangle'),
+  addEllipse: document.querySelector('#add-ellipse'),
   addText: document.querySelector('#add-text'),
   drawStraightConnector: document.querySelector('#draw-straight-connector'),
   drawOrthogonalConnector: document.querySelector('#draw-orthogonal-connector'),
@@ -55,6 +56,17 @@ const elements = {
   propertyText: document.querySelector('#property-text'),
   propertyTextNote: document.querySelector('#property-text-note'),
   applyProperties: document.querySelector('#apply-properties'),
+  appearanceForm: document.querySelector('#selection-appearance-form'),
+  appearanceStrokeSection: document.querySelector('#appearance-stroke-section'),
+  appearanceStrokeEnabled: document.querySelector('#appearance-stroke-enabled'),
+  appearanceStrokeColor: document.querySelector('#appearance-stroke-color'),
+  appearanceStrokeWidth: document.querySelector('#appearance-stroke-width'),
+  appearanceFillSection: document.querySelector('#appearance-fill-section'),
+  appearanceFillEnabled: document.querySelector('#appearance-fill-enabled'),
+  appearanceFillColor: document.querySelector('#appearance-fill-color'),
+  appearanceTextColorField: document.querySelector('#appearance-text-color-field'),
+  appearanceTextColor: document.querySelector('#appearance-text-color'),
+  applyAppearance: document.querySelector('#apply-appearance'),
   rulerX: document.querySelector('#ruler-x'),
   rulerY: document.querySelector('#ruler-y'),
   canvasPage: document.querySelector('#canvas-page'),
@@ -71,11 +83,13 @@ const actionButtons = [
   elements.undo,
   elements.redo,
   elements.addRectangle,
+  elements.addEllipse,
   elements.addText,
   elements.drawStraightConnector,
   elements.drawOrthogonalConnector,
   elements.deleteSelection,
   elements.applyProperties,
+  elements.applyAppearance,
   elements.addPage,
   elements.deletePage,
   elements.applyPageProperties,
@@ -97,6 +111,7 @@ let presentationRequestSequence = 0;
 let currentPresentation = null;
 let currentSelectionProperties = null;
 let currentNavigation = null;
+let appearanceBaseline = null;
 let connectorTool = null;
 let isBusy = false;
 let keyboardSurface = null;
@@ -137,6 +152,7 @@ function setBusy(busy) {
     elements.deleteSelection.disabled = selectionCount === 0;
     elements.applyProperties.disabled =
       !primary || (primary.geometryEditable === false && primary.textEditable !== true);
+    elements.applyAppearance.disabled = !primary?.appearance;
     updateStructureDisabledState();
   }
 }
@@ -191,6 +207,7 @@ function updateStructureDisabledState() {
     : 'Delete the active layer';
   const layerEditable = Boolean(activeLayer?.visible && !activeLayer?.locked);
   elements.addRectangle.disabled = isBusy || !layerEditable;
+  elements.addEllipse.disabled = isBusy || !layerEditable;
   elements.addText.disabled = isBusy || !layerEditable;
   elements.drawStraightConnector.disabled = isBusy || !layerEditable;
   elements.drawOrthogonalConnector.disabled = isBusy || !layerEditable;
@@ -199,6 +216,9 @@ function updateStructureDisabledState() {
   }
   elements.addRectangle.title = layerEditable
     ? 'Create a rectangle on the active layer'
+    : 'Choose a visible, unlocked layer to create elements';
+  elements.addEllipse.title = layerEditable
+    ? 'Create an ellipse on the active layer'
     : 'Choose a visible, unlocked layer to create elements';
   elements.addText.title = layerEditable
     ? 'Create a text box on the active layer'
@@ -413,6 +433,8 @@ function renderSelectionProperties(details) {
     svgSurface.setTransformSelection(null);
     svgSurface.setConnectorEndpointSelection(null);
     elements.selectionPropertiesForm.hidden = true;
+    elements.appearanceForm.hidden = true;
+    appearanceBaseline = null;
     return;
   }
 
@@ -454,6 +476,8 @@ function renderSelectionProperties(details) {
   const hasText = primary.text !== null && primary.text !== undefined;
   elements.propertyTextField.hidden = !hasText;
   elements.propertyTextNote.hidden = !hasText || primary.textEditable;
+  renderAppearance(primary.appearance);
+
   if (hasText) {
     elements.propertyText.value = primary.text;
     elements.propertyText.disabled = !primary.textEditable;
@@ -461,6 +485,99 @@ function renderSelectionProperties(details) {
       elements.propertyTextNote.textContent =
         'Rich text is shown for reference; this basic editor will not flatten mixed formatting or dynamic fields.';
     }
+  }
+}
+
+
+function renderAppearance(appearance) {
+  const available = Boolean(
+    appearance &&
+      (appearance.strokeApplicable || appearance.fillApplicable || appearance.textColorApplicable),
+  );
+  elements.appearanceForm.hidden = !available;
+  elements.applyAppearance.disabled = !available || isBusy;
+  if (!available) {
+    appearanceBaseline = null;
+    return;
+  }
+
+  elements.appearanceStrokeSection.hidden = !appearance.strokeApplicable;
+  elements.appearanceFillSection.hidden = !appearance.fillApplicable;
+  elements.appearanceTextColorField.hidden = !appearance.textColorApplicable;
+  elements.appearanceStrokeEnabled.checked = appearance.strokeEnabled;
+  elements.appearanceStrokeColor.value = appearance.strokeColor;
+  elements.appearanceStrokeWidth.value = String(appearance.strokeWidthMm);
+  elements.appearanceFillEnabled.checked = appearance.fillEnabled;
+  elements.appearanceFillColor.value = appearance.fillColor;
+  elements.appearanceTextColor.value = appearance.textColor;
+  appearanceBaseline = Object.freeze({ ...appearance });
+  updateAppearanceEnabledState();
+}
+
+function updateAppearanceEnabledState() {
+  elements.appearanceStrokeColor.disabled = !elements.appearanceStrokeEnabled.checked;
+  elements.appearanceStrokeWidth.disabled = !elements.appearanceStrokeEnabled.checked;
+  elements.appearanceFillColor.disabled = !elements.appearanceFillEnabled.checked;
+}
+
+async function applyAppearance(event) {
+  event.preventDefault();
+  const primary = currentSelectionProperties?.primary;
+  const baseline = appearanceBaseline;
+  if (!invoke || !primary || !baseline) {
+    return;
+  }
+  const request = { elementId: primary.elementId };
+  if (baseline.strokeApplicable) {
+    if (elements.appearanceStrokeEnabled.checked !== baseline.strokeEnabled) {
+      request.strokeEnabled = elements.appearanceStrokeEnabled.checked;
+    }
+    if (elements.appearanceStrokeColor.value.toLowerCase() !== baseline.strokeColor.toLowerCase()) {
+      request.strokeColor = elements.appearanceStrokeColor.value;
+    }
+    const width = Number(elements.appearanceStrokeWidth.value);
+    if (!Number.isFinite(width) || width <= 0) {
+      setStatus('Stroke width must be a finite positive value');
+      return;
+    }
+    if (width !== baseline.strokeWidthMm) {
+      request.strokeWidthMm = width;
+    }
+  }
+  if (baseline.fillApplicable) {
+    if (elements.appearanceFillEnabled.checked !== baseline.fillEnabled) {
+      request.fillEnabled = elements.appearanceFillEnabled.checked;
+    }
+    if (elements.appearanceFillColor.value.toLowerCase() !== baseline.fillColor.toLowerCase()) {
+      request.fillColor = elements.appearanceFillColor.value;
+    }
+  }
+  if (
+    baseline.textColorApplicable &&
+    elements.appearanceTextColor.value.toLowerCase() !== baseline.textColor.toLowerCase()
+  ) {
+    request.textColor = elements.appearanceTextColor.value;
+  }
+  if (Object.keys(request).length === 1) {
+    setStatus('Appearance unchanged');
+    return;
+  }
+
+  setBusy(true);
+  try {
+    const result = await invoke('update_element_appearance', { request });
+    renderState(result.state);
+    await refreshPresentation({ preserveSelection: true });
+    const selection = result.selectedElementIds ?? [primary.elementId];
+    svgSurface.setSelection(selection);
+    keyboardSurface?.syncSelectionState(selection);
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus('Appearance updated');
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -541,7 +658,7 @@ async function createBasicElement(kind) {
     keyboardSurface?.syncSelectionState(result.selectedElementIds ?? []);
     await refreshSelectionProperties();
     scheduleRecoverySync(250);
-    setStatus(kind === 'text' ? 'Text box created' : 'Rectangle created');
+    setStatus(kind === 'text' ? 'Text box created' : kind === 'ellipse' ? 'Ellipse created' : 'Rectangle created');
   } catch (error) {
     setStatus(formatInvokeError(error));
   } finally {
@@ -1007,6 +1124,10 @@ elements.addRectangle.addEventListener('click', () => {
   void createBasicElement('rectangle');
 });
 
+elements.addEllipse.addEventListener('click', () => {
+  void createBasicElement('ellipse');
+});
+
 elements.addText.addEventListener('click', () => {
   void createBasicElement('text');
 });
@@ -1026,6 +1147,12 @@ elements.deleteSelection.addEventListener('click', () => {
 elements.selectionPropertiesForm.addEventListener('submit', (event) => {
   void applyElementProperties(event);
 });
+
+elements.appearanceForm.addEventListener('submit', (event) => {
+  void applyAppearance(event);
+});
+elements.appearanceStrokeEnabled.addEventListener('change', updateAppearanceEnabledState);
+elements.appearanceFillEnabled.addEventListener('change', updateAppearanceEnabledState);
 
 elements.saveDocument.addEventListener('click', () => {
   void runAction(

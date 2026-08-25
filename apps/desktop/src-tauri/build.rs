@@ -32,6 +32,7 @@ fn main() {
             "set_connector_endpoint",
             "delete_selection",
             "update_element_properties",
+            "update_element_appearance",
             "new_document",
             "open_document",
             "save_document",

@@ -32,6 +32,7 @@
           <button id="toggle-snap" class="toggle-button" type="button" aria-pressed="true">Snap</button>
           <span class="toolbar-separator" aria-hidden="true"></span>
           <button id="add-rectangle" type="button" title="Create a rectangle on the active layer">Rectangle</button>
+          <button id="add-ellipse" type="button" title="Create an ellipse on the active layer">Ellipse</button>
           <button id="add-text" type="button" title="Create a text box on the active layer">Text</button>
           <button id="draw-straight-connector" class="toggle-button" type="button" aria-pressed="false" title="Draw straight connectors">Line</button>
           <button id="draw-orthogonal-connector" class="toggle-button" type="button" aria-pressed="false" title="Draw orthogonal connectors">Orthogonal</button>
@@ -130,6 +131,28 @@
               </label>
               <p id="property-text-note" class="property-note" hidden></p>
               <button id="apply-properties" class="primary" type="submit">Apply properties</button>
+            </form>
+
+            <form id="selection-appearance-form" class="appearance-form" hidden>
+              <div class="appearance-heading">
+                <h3>Appearance</h3>
+                <span>basic</span>
+              </div>
+              <div id="appearance-stroke-section" class="appearance-section">
+                <label class="appearance-toggle"><input id="appearance-stroke-enabled" type="checkbox" /> Stroke</label>
+                <div class="appearance-row">
+                  <label>Color <input id="appearance-stroke-color" type="color" value="#000000" /></label>
+                  <label>Width <input id="appearance-stroke-width" type="number" min="0.05" step="0.05" value="0.25" /></label>
+                </div>
+              </div>
+              <div id="appearance-fill-section" class="appearance-section">
+                <label class="appearance-toggle"><input id="appearance-fill-enabled" type="checkbox" /> Fill</label>
+                <label class="appearance-color-field">Color <input id="appearance-fill-color" type="color" value="#ffffff" /></label>
+              </div>
+              <label id="appearance-text-color-field" class="appearance-color-field">
+                Text color <input id="appearance-text-color" type="color" value="#000000" />
+              </label>
+              <button id="apply-appearance" type="submit">Apply appearance</button>
             </form>
           </section>
 
