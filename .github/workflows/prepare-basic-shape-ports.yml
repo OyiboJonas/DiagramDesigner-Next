@@ -19,12 +19,13 @@ jobs:
         with:
           toolchain: 1.85.0
           components: rustfmt
+          targets: x86_64-pc-windows-msvc
       - name: Apply default shape ports
         run: python scripts/prepare-basic-shape-ports.py
       - name: Format desktop Rust
         run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
-      - name: Check desktop Rust
-        run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Check desktop Rust for Windows target
+        run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
       - name: Verify patch
         run: git diff --check
       - name: Commit prepared shape ports
