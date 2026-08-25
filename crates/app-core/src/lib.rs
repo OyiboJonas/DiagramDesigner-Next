@@ -284,13 +284,16 @@ impl ApplicationSession {
         elements: Vec<Element>,
         appearance_updates: Vec<ElementAppearanceUpdate>,
     ) -> Result<bool, ApplicationError> {
-        let mut transaction = EditTransaction::new(elements.into_iter().map(|element| {
-            EditCommand::CreateElement {
-                target,
-                element,
-                z_index: None,
-            }
-        }));
+        let mut transaction =
+            EditTransaction::new(
+                elements
+                    .into_iter()
+                    .map(|element| EditCommand::CreateElement {
+                        target,
+                        element,
+                        z_index: None,
+                    }),
+            );
         for update in appearance_updates {
             transaction.push(EditCommand::SetElementAppearance {
                 element_id: update.element_id,

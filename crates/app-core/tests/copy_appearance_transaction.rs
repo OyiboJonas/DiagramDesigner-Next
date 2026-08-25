@@ -121,11 +121,13 @@ fn copied_element_and_dedicated_appearance_commit_as_one_history_step() {
 
     assert!(app.undo().unwrap());
     assert_eq!(app.session().current_history_state(), initial_history);
-    assert!(app.session().document().pages[0].layers[0]
-        .scene
-        .elements
-        .iter()
-        .all(|element| element.id != element_id));
+    assert!(
+        app.session().document().pages[0].layers[0]
+            .scene
+            .elements
+            .iter()
+            .all(|element| element.id != element_id)
+    );
 
     assert!(app.redo().unwrap());
     assert_eq!(app.session().current_history_state(), committed_history);
