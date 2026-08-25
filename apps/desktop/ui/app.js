@@ -647,6 +647,12 @@ async function commitSvgConnector(commit) {
         kind: commit.connectorKind,
         startMm: { ...commit.startMm },
         endMm: { ...commit.endMm },
+        startConnection: commit.startConnection
+          ? { elementId: commit.startConnection.elementId, portId: commit.startConnection.portId }
+          : null,
+        endConnection: commit.endConnection
+          ? { elementId: commit.endConnection.elementId, portId: commit.endConnection.portId }
+          : null,
       },
     });
     renderState(result.state);

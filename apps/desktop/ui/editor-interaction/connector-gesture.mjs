@@ -19,17 +19,22 @@ export class ConnectorGestureError extends Error {
 export class ConnectorGestureController {
   #screenToDocument;
   #minimumLengthMm;
+  #resolvePortTarget;
   #active = null;
 
-  constructor({ screenToDocument, minimumLengthMm = 0.5 } = {}) {
+  constructor({ screenToDocument, minimumLengthMm = 0.5, resolvePortTarget = () => null } = {}) {
     if (typeof screenToDocument !== 'function') {
       throw new ConnectorGestureError('screenToDocument must be a function');
     }
     if (!Number.isFinite(minimumLengthMm) || minimumLengthMm < 0) {
       throw new ConnectorGestureError('minimumLengthMm must be finite and non-negative');
     }
+    if (typeof resolvePortTarget !== 'function') {
+      throw new ConnectorGestureError('resolvePortTarget must be a function');
+    }
     this.#screenToDocument = screenToDocument;
     this.#minimumLengthMm = minimumLengthMm;
+    this.#resolvePortTarget = resolvePortTarget;
   }
 
   get activePointerId() {
@@ -46,12 +51,17 @@ export class ConnectorGestureController {
     }
     validatePointerId(pointerId);
     const kind = normalizeConnectorKind(connectorKind);
-    const startMm = validateDocumentPoint(this.#screenToDocument(validateScreenPoint(screenPoint)));
+    const rawStartMm = validateDocumentPoint(
+      this.#screenToDocument(validateScreenPoint(screenPoint)),
+    );
+    const startEndpoint = this.#resolveEndpoint(rawStartMm, 'start');
     this.#active = {
       pointerId,
       connectorKind: kind,
-      startMm,
-      endMm: startMm,
+      startMm: startEndpoint.positionMm,
+      endMm: startEndpoint.positionMm,
+      startConnection: startEndpoint.connection,
+      endConnection: startEndpoint.connection,
     };
     return this.#preview();
   }
@@ -60,9 +70,12 @@ export class ConnectorGestureController {
     if (this.#active === null || this.#active.pointerId !== pointerId) {
       return null;
     }
-    this.#active.endMm = validateDocumentPoint(
+    const rawEndMm = validateDocumentPoint(
       this.#screenToDocument(validateScreenPoint(screenPoint)),
     );
+    const endEndpoint = this.#resolveEndpoint(rawEndMm, 'end');
+    this.#active.endMm = endEndpoint.positionMm;
+    this.#active.endConnection = endEndpoint.connection;
     return this.#preview();
   }
 
@@ -81,6 +94,8 @@ export class ConnectorGestureController {
       connectorKind: finished.connectorKind,
       startMm: Object.freeze({ ...finished.startMm }),
       endMm: Object.freeze({ ...finished.endMm }),
+      startConnection: freezeConnection(finished.startConnection),
+      endConnection: freezeConnection(finished.endConnection),
     });
   }
 
@@ -90,6 +105,27 @@ export class ConnectorGestureController {
     }
     this.#active = null;
     return true;
+  }
+
+  #resolveEndpoint(pointMm, side) {
+    const target = normalizePortTarget(
+      this.#resolvePortTarget(
+        Object.freeze({
+          pointMm: Object.freeze({ ...pointMm }),
+          side,
+        }),
+      ),
+    );
+    if (target === null) {
+      return {
+        positionMm: Object.freeze({ ...pointMm }),
+        connection: null,
+      };
+    }
+    return {
+      positionMm: target.positionMm,
+      connection: Object.freeze({ elementId: target.elementId, portId: target.portId }),
+    };
   }
 
   #preview() {
@@ -102,6 +138,8 @@ export class ConnectorGestureController {
       connectorKind: this.#active.connectorKind,
       startMm: Object.freeze({ ...this.#active.startMm }),
       endMm: Object.freeze({ ...this.#active.endMm }),
+      startConnection: freezeConnection(this.#active.startConnection),
+      endConnection: freezeConnection(this.#active.endConnection),
     });
   }
 }
@@ -325,6 +363,31 @@ function validateDocumentPoint(point) {
     throw new ConnectorGestureError('document point must contain finite x/y');
   }
   return normalized;
+}
+
+function normalizePortTarget(target) {
+  if (target == null) {
+    return null;
+  }
+  const elementId = target.elementId;
+  const portId = target.portId;
+  if (typeof elementId !== 'string' || elementId.length === 0) {
+    throw new ConnectorGestureError('resolved port target requires a non-empty elementId');
+  }
+  if (typeof portId !== 'string' || portId.length === 0) {
+    throw new ConnectorGestureError('resolved port target requires a non-empty portId');
+  }
+  return Object.freeze({
+    elementId,
+    portId,
+    positionMm: Object.freeze(validateDocumentPoint(target.positionMm)),
+  });
+}
+
+function freezeConnection(connection) {
+  return connection == null
+    ? null
+    : Object.freeze({ elementId: connection.elementId, portId: connection.portId });
 }
 
 function distance(left, right) {
