@@ -1,0 +1,51 @@
+name: Prepare direct manipulation
+
+on:
+  push:
+    branches: [desktop-direct-manipulation]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-direct-manipulation
+          fetch-depth: 0
+      - name: Apply direct manipulation integration
+        run: python scripts/prepare-direct-manipulation.py
+      - name: Check desktop interaction syntax
+        run: |
+          node --check apps/desktop/ui/app.js
+          node --check apps/desktop/ui/candidate-svg-surface.mjs
+          node --check apps/desktop/ui/editor-interaction/mouse-selection.mjs
+          node --check apps/desktop/ui/editor-interaction/transform-gesture.mjs
+          node --check web/editor-interaction/mouse-selection.mjs
+          node --check web/editor-interaction/transform-gesture.mjs
+      - name: Test all frontend interactions
+        run: node --test web/editor-interaction/*.test.mjs
+      - name: Verify product integration markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'commitTransform: commitSvgTransform' apps/desktop/ui/app.js
+          grep -q 'setTransformSelection(selection)' apps/desktop/ui/candidate-svg-surface.mjs
+          grep -q 'resolveMouseSelection' apps/desktop/ui/candidate-svg-surface.mjs
+          grep -q 'data-ddn-transform-handle' apps/desktop/ui/styles.css
+      - name: Verify patch
+        run: git diff --check
+      - name: Commit prepared product changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm scripts/prepare-direct-manipulation.py
+          rm .github/workflows/prepare-direct-manipulation.yml
+          git config user.name "DiagramDesigner Next automation"
+          git config user.email "190651966+OyiboJonas@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Desktop: add direct resize rotation and mouse multi-selection"
+          git push origin HEAD:desktop-direct-manipulation
