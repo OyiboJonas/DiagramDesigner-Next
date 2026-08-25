@@ -1,0 +1,40 @@
+name: Prepare connector port UI
+
+on:
+  push:
+    branches: [desktop-connector-port-editing]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-connector-port-editing
+          fetch-depth: 0
+      - name: Apply connector endpoint UI integration
+        run: python scripts/prepare-connector-port-ui.py
+      - name: Check desktop JavaScript syntax
+        run: |
+          node --check apps/desktop/ui/app.js
+          node --check apps/desktop/ui/candidate-svg-surface.mjs
+          node --check apps/desktop/ui/editor-interaction/connector-endpoint-gesture.mjs
+      - name: Run frontend interaction tests
+        run: node --test web/editor-interaction/*.test.mjs
+      - name: Verify patch
+        run: git diff --check
+      - name: Commit prepared UI integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm scripts/prepare-connector-port-ui.py
+          rm .github/workflows/prepare-connector-port-ui.yml
+          git config user.name "DiagramDesigner Next automation"
+          git config user.email "190651966+OyiboJonas@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Desktop: edit connector endpoints on SVG surface"
+          git push origin HEAD:desktop-connector-port-editing
