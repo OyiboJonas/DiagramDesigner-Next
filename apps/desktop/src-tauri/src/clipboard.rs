@@ -14,6 +14,7 @@ pub struct ClipboardPayload {
 pub struct ClipboardInstantiation {
     pub elements: Vec<Element>,
     pub element_ids: Vec<ElementId>,
+    pub source_element_ids: BTreeMap<ElementId, ElementId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +108,7 @@ impl ClipboardPayload {
         ClipboardInstantiation {
             elements: instantiated,
             element_ids: selected,
+            source_element_ids: element_ids,
         }
     }
 }

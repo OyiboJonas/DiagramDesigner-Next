@@ -60,6 +60,14 @@ pub struct ConnectorPortPosition {
     pub position_mm: Point,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ElementAppearanceUpdate {
+    pub element_id: ElementId,
+    pub stroke: Option<StrokeStyle>,
+    pub fill: Option<FillStyle>,
+    pub text_color: Option<Color>,
+}
+
 impl From<CoreConnectorEndpointSnapshot> for ConnectorEndpoints {
     fn from(value: CoreConnectorEndpointSnapshot) -> Self {
         let kind = match value.kind {
@@ -274,15 +282,24 @@ impl ApplicationSession {
         &mut self,
         target: LayerTarget,
         elements: Vec<Element>,
+        appearance_updates: Vec<ElementAppearanceUpdate>,
     ) -> Result<bool, ApplicationError> {
-        let commands = elements
-            .into_iter()
-            .map(|element| EditCommand::CreateElement {
+        let mut transaction = EditTransaction::new(elements.into_iter().map(|element| {
+            EditCommand::CreateElement {
                 target,
                 element,
                 z_index: None,
+            }
+        }));
+        for update in appearance_updates {
+            transaction.push(EditCommand::SetElementAppearance {
+                element_id: update.element_id,
+                stroke: update.stroke,
+                fill: update.fill,
+                text_color: update.text_color,
             });
-        self.execute_edit_transaction(EditTransaction::new(commands))
+        }
+        self.execute_edit_transaction(transaction)
     }
 
     /// Commit one connector endpoint as either a free point or a durable

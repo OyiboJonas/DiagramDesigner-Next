@@ -13,6 +13,7 @@ use app_core::{
     ApplicationSession, ConnectorEndpointSide as AppConnectorEndpointSide,
     ConnectorEndpointState as AppConnectorEndpointState,
     ConnectorEndpoints as AppConnectorEndpoints, ConnectorGeometryKind as AppConnectorGeometryKind,
+    ElementAppearanceUpdate,
 };
 use ddnx::PackageLimits;
 use editor_runtime::RecoveryPlan;
@@ -20,7 +21,8 @@ use next_domain::{
     AnchorSet, Color, Connection, Connector, ConnectorLabelStyle, Document, DocumentDefaults,
     DocumentId, Element, ElementId, ElementKind, Endpoint, FillStyle, Layer, LayerId, LineStyle,
     MarkerStyle, NextArtifact, NormalizedPoint, Page, PageId, Point, Port, PortId, Rect,
-    RichTextDocument, RichTextToken, Scene, Size, StrokeStyle, TextBlock, TextHorizontalAlignment,
+    RichTextDocument, RichTextToken, Scene, Size, StrokeStyle, StyleId, TextBlock,
+    TextHorizontalAlignment,
     TextLayout, TextStyle, TextVerticalAlignment,
 };
 use platform_fs::{AtomicSaveError, CommitMode, DurabilityLevel, atomic_save};
@@ -1215,11 +1217,15 @@ fn paste_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultDt
         .as_mut()
         .ok_or_else(|| CommandError::new("clipboard_empty", "Copy a selection before pasting."))?;
     let next_step = clipboard.paste_count.saturating_add(1).max(1);
-    let instantiated = clipboard.payload.instantiate(next_step);
+    let mut instantiated = clipboard.payload.instantiate(next_step);
     let selected = instantiated.element_ids.clone();
+    let appearance_updates = prepare_clipboard_appearance_updates(
+        document.session.session().document(),
+        &mut instantiated,
+    )?;
     document
         .session
-        .create_elements(target, instantiated.elements)
+        .create_elements(target, instantiated.elements, appearance_updates)
         .map_err(|error| CommandError::new("clipboard_paste_failed", error.to_string()))?;
     document
         .session
@@ -1249,11 +1255,15 @@ fn duplicate_selection(
         .collect();
     let payload = clipboard::capture_selection(document.session.session().document(), &selected)
         .map_err(|error| CommandError::new("duplicate_failed", error.to_string()))?;
-    let instantiated = payload.instantiate(1);
+    let mut instantiated = payload.instantiate(1);
     let duplicated_ids = instantiated.element_ids.clone();
+    let appearance_updates = prepare_clipboard_appearance_updates(
+        document.session.session().document(),
+        &mut instantiated,
+    )?;
     document
         .session
-        .create_elements(target, instantiated.elements)
+        .create_elements(target, instantiated.elements, appearance_updates)
         .map_err(|error| CommandError::new("duplicate_failed", error.to_string()))?;
     document
         .session
@@ -1271,6 +1281,61 @@ fn clear_application_clipboard(state: &State<'_, DesktopState>) -> Result<(), Co
     })?;
     *application_clipboard = None;
     Ok(())
+}
+
+fn prepare_clipboard_appearance_updates(
+    document: &Document,
+    instantiated: &mut clipboard::ClipboardInstantiation,
+) -> Result<Vec<ElementAppearanceUpdate>, CommandError> {
+    const APPEARANCE_STYLE_NAMESPACE: &str = "diagramdesigner-next:element-appearance";
+    let mut updates = Vec::new();
+
+    for (source_id, copied_id) in &instantiated.source_element_ids {
+        let source = find_element(document, *source_id).ok_or_else(|| {
+            CommandError::new(
+                "clipboard_source_missing",
+                "A copied source element no longer exists in the current document.",
+            )
+        })?;
+        let dedicated_style_id = StyleId::v5(source_id.0, APPEARANCE_STYLE_NAMESPACE);
+        if source.style_id != Some(dedicated_style_id) {
+            continue;
+        }
+        let style = document
+            .styles
+            .iter()
+            .find(|style| style.id == dedicated_style_id)
+            .ok_or_else(|| {
+                CommandError::new(
+                    "clipboard_appearance_missing",
+                    "The copied element's dedicated appearance style is missing.",
+                )
+            })?;
+        let copied = instantiated
+            .elements
+            .iter_mut()
+            .find(|element| element.id == *copied_id)
+            .ok_or_else(|| {
+                CommandError::new(
+                    "clipboard_copy_missing",
+                    "The instantiated clipboard element could not be resolved.",
+                )
+            })?;
+
+        // A dedicated appearance style is element-owned. Do not share the source
+        // element's deterministic style ID with the copy: create the copied element
+        // unstyled first, then materialize an equivalent dedicated style in the same
+        // editor transaction under the copied element's own deterministic ID.
+        copied.style_id = None;
+        updates.push(ElementAppearanceUpdate {
+            element_id: *copied_id,
+            stroke: style.stroke.clone(),
+            fill: style.fill.clone(),
+            text_color: style.text_color,
+        });
+    }
+
+    Ok(updates)
 }
 
 #[tauri::command]
