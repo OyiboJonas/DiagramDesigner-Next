@@ -115,6 +115,7 @@ struct DocumentStateDto {
     imported: bool,
     dirty: bool,
     recovered: bool,
+    version: &'static str,
     page_count: usize,
     active_page_id: Option<PageId>,
     document_generation: u64,
@@ -1535,8 +1536,15 @@ fn sync_recovery(
     app: AppHandle,
     state: State<'_, DesktopState>,
 ) -> Result<RecoverySyncDto, CommandError> {
-    let path = recovery_path(&app)?;
     let mut document = lock_document(&state)?;
+    sync_recovery_for_document(&app, &mut document)
+}
+
+fn sync_recovery_for_document(
+    app: &AppHandle,
+    document: &mut DesktopDocument,
+) -> Result<RecoverySyncDto, CommandError> {
+    let path = recovery_path(app)?;
 
     // A restored copy intentionally has no user-visible persisted baseline. While
     // it is in that state, always checkpoint the exact current document directly.
@@ -2058,8 +2066,12 @@ fn lock_document<'a>(
     })
 }
 
+fn document_is_dirty(document: &DesktopDocument) -> bool {
+    document.recovered_dirty || document.imported_dirty || document.session.is_dirty()
+}
+
 fn reject_if_dirty(document: &DesktopDocument) -> Result<(), CommandError> {
-    if document.recovered_dirty || document.imported_dirty || document.session.is_dirty() {
+    if document_is_dirty(document) {
         return Err(CommandError::new(
             "unsaved_changes",
             "The current document has unsaved changes. Save it before replacing the document session.",
@@ -2081,8 +2093,9 @@ fn document_state_dto(document: &DesktopDocument) -> DocumentStateDto {
             .as_deref()
             .map(|path| path.to_string_lossy().into_owned()),
         imported: document.source_path.is_some(),
-        dirty: document.recovered_dirty || document.imported_dirty || document.session.is_dirty(),
+        dirty: document_is_dirty(document),
         recovered: document.recovered_dirty,
+        version: env!("CARGO_PKG_VERSION"),
         page_count: session.document().pages.len(),
         active_page_id: session.active_page_id(),
         document_generation: document.session.document_generation(),
@@ -2173,6 +2186,44 @@ fn map_recovery_save_error(error: AtomicSaveError) -> CommandError {
     }
 }
 
+fn report_close_checkpoint_error(app: &AppHandle, message: &str) {
+    eprintln!("DiagramDesigner Next close blocked: {message}");
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let payload = serde_json::to_string(message)
+        .unwrap_or_else(|_| "\"Unknown recovery checkpoint error\"".to_owned());
+    let _ = window.eval(format!(
+        "window.diagramDesignerNext?.reportCloseCheckpointError({payload});"
+    ));
+}
+
+fn checkpoint_dirty_document_before_close(window: &tauri::Window, api: &tauri::CloseRequestApi) {
+    if window.label() != "main" {
+        return;
+    }
+    let app = window.app_handle();
+    let state = app.state::<DesktopState>();
+    let mut document = match state.document.lock() {
+        Ok(document) => document,
+        Err(_) => {
+            api.prevent_close();
+            report_close_checkpoint_error(
+                app,
+                "The document state could not be locked for the final recovery checkpoint.",
+            );
+            return;
+        }
+    };
+    if !document_is_dirty(&document) {
+        return;
+    }
+    if let Err(error) = sync_recovery_for_document(app, &mut document) {
+        api.prevent_close();
+        report_close_checkpoint_error(app, &error.message);
+    }
+}
+
 fn desktop_document_defaults() -> DocumentDefaults {
     DocumentDefaults {
         font_family: "Arial".to_owned(),
@@ -2229,6 +2280,11 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state)
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                checkpoint_dirty_document_before_close(window, api);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             document_state,
             document_navigation,
