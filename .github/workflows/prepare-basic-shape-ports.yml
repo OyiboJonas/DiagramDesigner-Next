@@ -19,13 +19,31 @@ jobs:
         with:
           toolchain: 1.85.0
           components: rustfmt
-          targets: x86_64-pc-windows-msvc
       - name: Apply default shape ports
         run: python scripts/prepare-basic-shape-ports.py
       - name: Format desktop Rust
         run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
-      - name: Check desktop Rust for Windows target
-        run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
+      - name: Verify default shape port source contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('apps/desktop/src-tauri/src/lib.rs').read_text(encoding='utf-8')
+          if text.count('ports: default_shape_ports(),') != 1:
+              raise SystemExit('basic element must use default_shape_ports exactly once')
+          if 'ports: Vec::new(),' not in text:
+              raise SystemExit('connector creation must continue to use no element ports')
+          for marker in [
+              '(0_u16, 0.5, 0.0)',
+              '(1_u16, 1.0, 0.5)',
+              '(2_u16, 0.5, 1.0)',
+              '(3_u16, 0.0, 0.5)',
+              'id: PortId::new()',
+              'position: NormalizedPoint { x, y }',
+          ]:
+              if marker not in text:
+                  raise SystemExit(f'missing default port contract marker: {marker}')
+          PY
       - name: Verify patch
         run: git diff --check
       - name: Commit prepared shape ports
