@@ -1,0 +1,58 @@
+name: Prepare basic appearance
+
+on:
+  push:
+    branches: [desktop-basic-appearance]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-basic-appearance
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Apply basic appearance implementation
+        run: python scripts/prepare-basic-appearance.py
+      - name: Format Rust
+        run: |
+          cargo fmt --all
+          cargo fmt --manifest-path crates/app-core/Cargo.toml
+          cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Test editor core
+        run: cargo test --locked -p editor-core
+      - name: Test application core
+        run: cargo test --manifest-path crates/app-core/Cargo.toml
+      - name: Check desktop shell
+        run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Check JavaScript
+        run: node --check apps/desktop/ui/app.js
+      - name: Verify integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'SetElementAppearance' crates/editor-core/src/lib.rs
+          grep -q 'set_element_appearance' crates/app-core/src/lib.rs
+          grep -q 'update_element_appearance' apps/desktop/src-tauri/src/lib.rs
+          grep -q 'add-ellipse' apps/desktop/ui/index.html
+          grep -q 'selection-appearance-form' apps/desktop/ui/index.html
+          git diff --check
+      - name: Commit product changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm scripts/prepare-basic-appearance.py
+          rm .github/workflows/prepare-basic-appearance.yml
+          git config user.name "DiagramDesigner Next automation"
+          git config user.email "190651966+OyiboJonas@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Desktop: add ellipse and basic appearance controls"
+          git push origin HEAD:desktop-basic-appearance
