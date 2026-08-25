@@ -23,8 +23,8 @@ jobs:
         run: cargo fmt --all
       - name: Validate app core
         run: |
-          cargo clippy --locked --manifest-path crates/app-core/Cargo.toml --all-targets -- -D warnings
-          cargo test --locked --manifest-path crates/app-core/Cargo.toml
+          cargo clippy --locked -p app-core --all-targets -- -D warnings
+          cargo test --locked -p app-core
       - name: Validate frontend
         run: |
           node --test web/editor-interaction/app-shortcuts.test.mjs
