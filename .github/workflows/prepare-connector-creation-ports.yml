@@ -19,6 +19,8 @@ jobs:
         with:
           toolchain: 1.85.0
           components: rustfmt
+      - name: Adjust preparation for web facade
+        run: python scripts/fix-connector-creation-prep.py
       - name: Apply connector creation port attachment
         run: python scripts/prepare-connector-creation-ports.py
       - name: Format desktop Rust
@@ -31,14 +33,15 @@ jobs:
           node --check web/editor-interaction/connector-gesture.mjs
       - name: Test connector interactions
         run: node --test web/editor-interaction/connector-gesture.test.mjs web/editor-interaction/connector-endpoint-gesture.test.mjs
-      - name: Verify production and test gesture copies match
-        run: cmp apps/desktop/ui/editor-interaction/connector-gesture.mjs web/editor-interaction/connector-gesture.mjs
+      - name: Verify web connector gesture facade
+        run: grep -Fq "../../apps/desktop/ui/editor-interaction/connector-gesture.mjs" web/editor-interaction/connector-gesture.mjs
       - name: Verify patch
         run: git diff --check
       - name: Commit prepared product changes
         shell: bash
         run: |
           set -euo pipefail
+          rm scripts/fix-connector-creation-prep.py
           rm scripts/prepare-connector-creation-ports.py
           rm .github/workflows/prepare-connector-creation-ports.yml
           git config user.name "DiagramDesigner Next automation"
