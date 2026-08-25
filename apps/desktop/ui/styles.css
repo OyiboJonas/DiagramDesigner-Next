@@ -444,6 +444,72 @@ button.toggle-button[aria-pressed="true"] {
   opacity: 0.95;
 }
 
+
+.candidate-svg-document [data-ddn-transform-editor] {
+  pointer-events: none;
+}
+
+.candidate-svg-document [data-ddn-transform-frame],
+.candidate-svg-document [data-ddn-transform-preview] {
+  fill: none;
+  stroke: var(--selection);
+  stroke-width: 1.5px;
+  stroke-dasharray: 4 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.candidate-svg-document [data-ddn-transform-preview] {
+  stroke-width: 2px;
+  opacity: 0.95;
+}
+
+.candidate-svg-document [data-ddn-transform-source="true"] {
+  opacity: 0.28;
+}
+
+.candidate-svg-document [data-ddn-transform-rotate-guide] {
+  stroke: var(--selection);
+  stroke-width: 1.2px;
+  vector-effect: non-scaling-stroke;
+}
+
+.candidate-svg-document [data-ddn-transform-handle] {
+  fill: var(--surface);
+  stroke: var(--selection);
+  stroke-width: 1.8px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+}
+
+.candidate-svg-document [data-ddn-transform-handle]:hover {
+  fill: var(--selection-soft);
+  stroke-width: 2.4px;
+}
+
+.candidate-svg-document [data-ddn-transform-handle="nw"],
+.candidate-svg-document [data-ddn-transform-handle="se"] {
+  cursor: nwse-resize;
+}
+
+.candidate-svg-document [data-ddn-transform-handle="ne"],
+.candidate-svg-document [data-ddn-transform-handle="sw"] {
+  cursor: nesw-resize;
+}
+
+.candidate-svg-document [data-ddn-transform-handle="n"],
+.candidate-svg-document [data-ddn-transform-handle="s"] {
+  cursor: ns-resize;
+}
+
+.candidate-svg-document [data-ddn-transform-handle="e"],
+.candidate-svg-document [data-ddn-transform-handle="w"] {
+  cursor: ew-resize;
+}
+
+.candidate-svg-document [data-ddn-transform-handle="rotate"] {
+  cursor: grab;
+}
+
 .candidate-svg-document [data-ddn-connector-endpoint-editor] {
   pointer-events: none;
 }

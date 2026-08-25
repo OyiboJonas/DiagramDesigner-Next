@@ -103,6 +103,7 @@ let keyboardSurface = null;
 
 const svgSurface = createSvgSurface(elements.canvasPage, {
   commitMove: commitSvgMove,
+  commitTransform: commitSvgTransform,
   commitConnector: commitSvgConnector,
   commitConnectorEndpoint: commitSvgConnectorEndpoint,
   onSelectionChange: (elementIds) => {
@@ -409,11 +410,22 @@ function renderSelectionProperties(details) {
   elements.applyProperties.disabled =
     !primary || (primary.geometryEditable === false && primary.textEditable !== true);
   if (!primary) {
+    svgSurface.setTransformSelection(null);
     svgSurface.setConnectorEndpointSelection(null);
     elements.selectionPropertiesForm.hidden = true;
     return;
   }
 
+  svgSurface.setTransformSelection(
+    primary.geometryEditable === false
+      ? null
+      : {
+          elementId: primary.elementId,
+          boundsMm: primary.boundsMm,
+          rotationDeg: primary.rotationDeg,
+          geometryEditable: true,
+        },
+  );
   svgSurface.setConnectorEndpointSelection(
     primary.connector
       ? { elementId: primary.elementId, ...primary.connector }
@@ -631,6 +643,33 @@ async function commitSvgMove(commit) {
   scheduleRecoverySync(250);
   setStatus('Move committed');
   return state;
+}
+
+async function commitSvgTransform(commit) {
+  if (!invoke) {
+    throw new Error('Tauri runtime not detected');
+  }
+  if (commit?.kind !== 'transform-element') {
+    throw new TypeError('SVG surface emitted an unsupported transform command');
+  }
+
+  const result = await invoke('update_element_properties', {
+    request: {
+      elementId: commit.elementId,
+      boundsMm: { ...commit.boundsMm },
+      rotationDeg: commit.rotationDeg,
+      text: null,
+    },
+  });
+  renderState(result.state);
+  await refreshPresentation({ preserveSelection: true });
+  const selection = result.selectedElementIds ?? [commit.elementId];
+  svgSurface.setSelection(selection);
+  keyboardSurface?.syncSelectionState(selection);
+  await refreshSelectionProperties();
+  scheduleRecoverySync(250);
+  setStatus('Direct transform committed');
+  return result.state;
 }
 
 async function commitSvgConnector(commit) {
@@ -1054,6 +1093,12 @@ window.addEventListener(
   'keydown',
   (event) => {
     if (event.key !== 'Escape' || elements.recoveryDialog.open) {
+      return;
+    }
+    if (svgSurface.cancelTransformGesture()) {
+      setStatus('Transform cancelled');
+      event.preventDefault();
+      event.stopPropagation();
       return;
     }
     if (svgSurface.cancelConnectorEndpointGesture()) {
