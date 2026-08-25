@@ -22,8 +22,7 @@ use next_domain::{
     DocumentId, Element, ElementId, ElementKind, Endpoint, FillStyle, Layer, LayerId, LineStyle,
     MarkerStyle, NextArtifact, NormalizedPoint, Page, PageId, Point, Port, PortId, Rect,
     RichTextDocument, RichTextToken, Scene, Size, StrokeStyle, StyleId, TextBlock,
-    TextHorizontalAlignment,
-    TextLayout, TextStyle, TextVerticalAlignment,
+    TextHorizontalAlignment, TextLayout, TextStyle, TextVerticalAlignment,
 };
 use platform_fs::{AtomicSaveError, CommitMode, DurabilityLevel, atomic_save};
 use render_plan::{RenderPlanOptions, build_page_plan};
