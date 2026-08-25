@@ -18,8 +18,9 @@ use editor_runtime::RecoveryPlan;
 use next_domain::{
     AnchorSet, Connection, Connector, ConnectorLabelStyle, Document, DocumentDefaults, DocumentId,
     Element, ElementId, ElementKind, Endpoint, Layer, LayerId, LineStyle, MarkerStyle,
-    NextArtifact, Page, PageId, Point, PortId, Rect, RichTextDocument, RichTextToken, Scene, Size,
-    TextBlock, TextHorizontalAlignment, TextLayout, TextStyle, TextVerticalAlignment,
+    NextArtifact, NormalizedPoint, Page, PageId, Point, Port, PortId, Rect, RichTextDocument,
+    RichTextToken, Scene, Size, TextBlock, TextHorizontalAlignment, TextLayout, TextStyle,
+    TextVerticalAlignment,
 };
 use platform_fs::{AtomicSaveError, CommitMode, DurabilityLevel, atomic_save};
 use render_plan::{RenderPlanOptions, build_page_plan};
@@ -887,7 +888,7 @@ fn create_basic_element(
         bounds_mm,
         rotation_deg: 0.0,
         anchors: AnchorSet::default(),
-        ports: Vec::new(),
+        ports: default_shape_ports(),
         style_id: None,
         text,
         kind,
@@ -1719,6 +1720,22 @@ fn connector_bounds(start_mm: Point, end_mm: Point) -> Rect {
         width: (start_mm.x - end_mm.x).abs().max(0.1),
         height: (start_mm.y - end_mm.y).abs().max(0.1),
     }
+}
+
+fn default_shape_ports() -> Vec<Port> {
+    [
+        (0_u16, 0.5, 0.0),
+        (1_u16, 1.0, 0.5),
+        (2_u16, 0.5, 1.0),
+        (3_u16, 0.0, 0.5),
+    ]
+    .into_iter()
+    .map(|(index, x, y)| Port {
+        id: PortId::new(),
+        index,
+        position: NormalizedPoint { x, y },
+    })
+    .collect()
 }
 
 fn simple_text_block(text: &str, style: TextStyle, layout: Option<TextLayout>) -> TextBlock {
