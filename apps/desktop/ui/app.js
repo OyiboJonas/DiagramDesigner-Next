@@ -104,6 +104,7 @@ let keyboardSurface = null;
 const svgSurface = createSvgSurface(elements.canvasPage, {
   commitMove: commitSvgMove,
   commitConnector: commitSvgConnector,
+  commitConnectorEndpoint: commitSvgConnectorEndpoint,
   onSelectionChange: (elementIds) => {
     keyboardSurface?.syncSelectionState(elementIds);
     void syncSelection(elementIds);
@@ -408,10 +409,16 @@ function renderSelectionProperties(details) {
   elements.applyProperties.disabled =
     !primary || (primary.geometryEditable === false && primary.textEditable !== true);
   if (!primary) {
+    svgSurface.setConnectorEndpointSelection(null);
     elements.selectionPropertiesForm.hidden = true;
     return;
   }
 
+  svgSurface.setConnectorEndpointSelection(
+    primary.connector
+      ? { elementId: primary.elementId, ...primary.connector }
+      : null,
+  );
   elements.selectionPropertiesForm.hidden = false;
   elements.selectionName.textContent = primary.name;
   elements.selectionType.textContent = primary.elementType;
@@ -649,6 +656,47 @@ async function commitSvgConnector(commit) {
     await refreshSelectionProperties();
     scheduleRecoverySync(250);
     setStatus(commit.connectorKind === 'straight' ? 'Straight connector created' : 'Orthogonal connector created');
+    return result.state;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function commitSvgConnectorEndpoint(commit) {
+  if (!invoke) {
+    throw new Error('Tauri runtime not detected');
+  }
+  if (commit?.kind !== 'set-connector-endpoint') {
+    throw new TypeError('SVG surface emitted an unsupported connector endpoint command');
+  }
+
+  setBusy(true);
+  try {
+    const result = await invoke('set_connector_endpoint', {
+      request: {
+        elementId: commit.elementId,
+        side: commit.side,
+        positionMm: { ...commit.positionMm },
+        connection: commit.connection
+          ? {
+              elementId: commit.connection.elementId,
+              portId: commit.connection.portId,
+            }
+          : null,
+      },
+    });
+    renderState(result.state);
+    await refreshPresentation({ preserveSelection: true });
+    const selection = result.selectedElementIds ?? [commit.elementId];
+    svgSurface.setSelection(selection);
+    keyboardSurface?.syncSelectionState(selection);
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus(
+      commit.connection
+        ? `${commit.side === 'start' ? 'Start' : 'End'} endpoint attached to port`
+        : `${commit.side === 'start' ? 'Start' : 'End'} endpoint set free`,
+    );
     return result.state;
   } finally {
     setBusy(false);
@@ -999,7 +1047,16 @@ elements.recoveryDialog.addEventListener('cancel', (event) => {
 window.addEventListener(
   'keydown',
   (event) => {
-    if (event.key === 'Escape' && connectorTool !== null && !elements.recoveryDialog.open) {
+    if (event.key !== 'Escape' || elements.recoveryDialog.open) {
+      return;
+    }
+    if (svgSurface.cancelConnectorEndpointGesture()) {
+      setStatus('Connector endpoint edit cancelled');
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (connectorTool !== null) {
       setConnectorTool(null);
       event.preventDefault();
       event.stopPropagation();
