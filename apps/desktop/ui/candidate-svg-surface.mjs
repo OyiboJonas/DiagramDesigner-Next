@@ -13,12 +13,24 @@ import {
   MoveGestureController,
   bindMovePointerSurface,
 } from "./editor-interaction/move-gesture.mjs";
+import { resolveMouseSelection } from "./editor-interaction/mouse-selection.mjs";
 import { snapMoveDelta } from "./editor-interaction/snapping.mjs";
+import {
+  TransformGestureController,
+  bindTransformPointerSurface,
+} from "./editor-interaction/transform-gesture.mjs";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const MOVE_OVERLAY_ATTRIBUTE = "data-ddn-move-overlay";
 const MOVING_SOURCE_ATTRIBUTE = "data-ddn-moving-source";
 const SELECTED_ATTRIBUTE = "data-ddn-selected";
+const TRANSFORM_EDITOR_ATTRIBUTE = "data-ddn-transform-editor";
+const TRANSFORM_FRAME_ATTRIBUTE = "data-ddn-transform-frame";
+const TRANSFORM_HANDLE_ATTRIBUTE = "data-ddn-transform-handle";
+const TRANSFORM_ELEMENT_ID_ATTRIBUTE = "data-ddn-transform-element-id";
+const TRANSFORM_PREVIEW_ATTRIBUTE = "data-ddn-transform-preview";
+const TRANSFORM_SOURCE_ATTRIBUTE = "data-ddn-transform-source";
+const TRANSFORM_ROTATE_GUIDE_ATTRIBUTE = "data-ddn-transform-rotate-guide";
 const SNAP_GUIDES_ATTRIBUTE = "data-ddn-snap-guides";
 const SNAP_GUIDE_ATTRIBUTE = "data-ddn-snap-guide";
 const CONNECTOR_PREVIEW_ATTRIBUTE = "data-ddn-connector-preview";
@@ -53,6 +65,7 @@ export function createCandidateSvgSurface(
   host,
   {
     commitMove,
+    commitTransform = () => {},
     commitConnector = () => {},
     commitConnectorEndpoint = () => {},
     onError = (error) => {
@@ -67,6 +80,9 @@ export function createCandidateSvgSurface(
   if (typeof commitMove !== "function") {
     throw new TypeError("commitMove must be a function");
   }
+  if (typeof commitTransform !== "function") {
+    throw new TypeError("commitTransform must be a function");
+  }
   if (typeof commitConnector !== "function") {
     throw new TypeError("commitConnector must be a function");
   }
@@ -79,6 +95,9 @@ export function createCandidateSvgSurface(
 
   let svg = null;
   let disposePointerBinding = null;
+  let transformController = null;
+  let transformSelection = null;
+  let transformCommitPending = false;
   let connectorController = null;
   let connectorTool = null;
   let connectorCommitPending = false;
@@ -118,6 +137,13 @@ export function createCandidateSvgSurface(
       endpointSelection = null;
       removeConnectorEndpointEditor(svg);
     }
+    if (
+      transformSelection &&
+      (applied.length !== 1 || applied[0] !== transformSelection.elementId)
+    ) {
+      transformSelection = null;
+      removeTransformEditor(svg);
+    }
     if (changed && notify) {
       onSelectionChange(Object.freeze([...selectedElementIds]));
     }
@@ -133,8 +159,13 @@ export function createCandidateSvgSurface(
     removeMoveOverlay(svg);
     if (!preview || !Array.isArray(preview.elementIds) || preview.elementIds.length === 0) {
       removeSnapGuides(svg);
+      renderTransformEditor(
+        svg,
+        connectorTool === null ? transformSelection : null,
+      );
       return;
     }
+    removeTransformEditor(svg);
 
     const group = document.createElementNS(SVG_NS, "g");
     group.setAttribute(MOVE_OVERLAY_ATTRIBUTE, "true");
@@ -214,6 +245,11 @@ export function createCandidateSvgSurface(
       screenToDocument,
       transformDelta: transformMoveDelta,
     });
+    transformController = new TransformGestureController({
+      screenToDocument,
+      minimumSizeMm: 1,
+      rotationSnapDeg: 15,
+    });
     connectorController = new ConnectorGestureController({
       screenToDocument,
       minimumLengthMm: 0.5,
@@ -247,23 +283,33 @@ export function createCandidateSvgSurface(
     const disposeMove = bindMovePointerSurface(svg, {
       controller: moveController,
       resolveElementIds: (event) => {
-        if (connectorTool !== null || endpointController?.isActive) {
+        if (
+          connectorTool !== null ||
+          endpointController?.isActive ||
+          transformController?.isActive
+        ) {
           return null;
         }
-        if (event.target?.closest?.(`[${CONNECTOR_ENDPOINT_HANDLE_ATTRIBUTE}]`)) {
+        if (
+          event.target?.closest?.(`[${CONNECTOR_ENDPOINT_HANDLE_ATTRIBUTE}]`) ||
+          event.target?.closest?.(`[${TRANSFORM_HANDLE_ATTRIBUTE}]`)
+        ) {
           return null;
         }
         const target = event.target?.closest?.("[data-element-id]");
-        if (!target || !svg.contains(target) || target.closest(`[${MOVE_OVERLAY_ATTRIBUTE}]`)) {
-          clearSelection();
-          return null;
-        }
-        const elementId = target.getAttribute("data-element-id");
-        if (!elementId) {
-          return null;
-        }
-        applySelection([elementId]);
-        return [elementId];
+        const hitElementId =
+          target && svg.contains(target) && !target.closest(`[${MOVE_OVERLAY_ATTRIBUTE}]`)
+            ? target.getAttribute("data-element-id")
+            : null;
+        const resolved = resolveMouseSelection({
+          currentIds: selectedElementIds,
+          hitElementId,
+          shiftKey: event.shiftKey,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+        });
+        applySelection(resolved.selectionIds);
+        return resolved.moveElementIds;
       },
       onOverlay: applyMovePreview,
       onCommit: (commit) => {
@@ -274,6 +320,70 @@ export function createCandidateSvgSurface(
           removeSnapGuides(svg);
           onError(error);
         });
+      },
+      onError,
+    });
+
+    const disposeTransform = bindTransformPointerSurface(svg, {
+      controller: transformController,
+      resolveHandle: (event) => {
+        if (
+          connectorTool !== null ||
+          endpointController?.isActive ||
+          transformCommitPending ||
+          !transformSelection ||
+          !presentationGeometry
+        ) {
+          return null;
+        }
+        const handle = event.target?.closest?.(`[${TRANSFORM_HANDLE_ATTRIBUTE}]`);
+        if (!handle || !svg.contains(handle)) {
+          return null;
+        }
+        if (
+          handle.getAttribute(TRANSFORM_ELEMENT_ID_ATTRIBUTE) !== transformSelection.elementId
+        ) {
+          return null;
+        }
+        return {
+          handle: handle.getAttribute(TRANSFORM_HANDLE_ATTRIBUTE),
+          selection: {
+            ...transformSelection,
+            pageSize: {
+              width: presentationGeometry.widthMm,
+              height: presentationGeometry.heightMm,
+            },
+          },
+        };
+      },
+      onOverlay: (preview) => {
+        if (preview === null) {
+          removeTransformPreview(svg);
+          renderTransformEditor(
+            svg,
+            connectorTool === null ? transformSelection : null,
+          );
+          return;
+        }
+        removeTransformEditor(svg);
+        renderTransformPreview(svg, preview);
+      },
+      onCommit: (commit) => {
+        renderTransformPreview(svg, { ...commit, kind: "transform-preview" });
+        transformCommitPending = true;
+        Promise.resolve()
+          .then(() => commitTransform(commit))
+          .catch((error) => {
+            removeTransformPreview(svg);
+            renderTransformEditor(
+              svg,
+              connectorTool === null ? transformSelection : null,
+            );
+            onError(error);
+          })
+          .finally(() => {
+            transformCommitPending = false;
+          });
       },
       onError,
     });
@@ -343,9 +453,11 @@ export function createCandidateSvgSurface(
     disposePointerBinding = () => {
       disposeEndpoint();
       disposeConnector();
+      disposeTransform();
       disposeMove();
       endpointController = null;
       connectorController = null;
+      transformController = null;
     };
   };
 
@@ -356,13 +468,17 @@ export function createCandidateSvgSurface(
       disposePointerBinding = null;
       removeMoveOverlay(svg);
       removeSnapGuides(svg);
+      removeTransformPreview(svg);
+      removeTransformEditor(svg);
       removeConnectorPreview(svg);
       removeConnectorToolPorts(svg);
       removeConnectorEndpointPreview(svg);
       removeConnectorEndpointEditor(svg);
       connectorController = null;
       endpointController = null;
+      transformController = null;
       endpointSelection = null;
+      transformSelection = null;
       clearSelection({ notify: false });
       host.replaceChildren();
       svg = null;
@@ -430,8 +546,30 @@ export function createCandidateSvgSurface(
         svg,
         next !== null && interactionSettings.snappingEnabled ? presentationGeometry : null,
       );
+      renderTransformEditor(svg, next === null ? transformSelection : null);
       renderConnectorEndpointEditor(svg, next === null ? endpointSelection : null, presentationGeometry);
       return connectorTool;
+    },
+
+    setTransformSelection(selection) {
+      cancelTransformGesture(svg, transformController);
+      transformSelection = normalizeTransformSelection(selection);
+      renderTransformEditor(
+        svg,
+        connectorTool === null ? transformSelection : null,
+      );
+      return transformSelection;
+    },
+
+    cancelTransformGesture() {
+      const cancelled = cancelTransformGesture(svg, transformController);
+      if (cancelled) {
+        renderTransformEditor(
+          svg,
+          connectorTool === null ? transformSelection : null,
+        );
+      }
+      return cancelled;
     },
 
     setConnectorEndpointSelection(selection) {
@@ -481,13 +619,17 @@ export function createCandidateSvgSurface(
       disposePointerBinding = null;
       removeMoveOverlay(svg);
       removeSnapGuides(svg);
+      removeTransformPreview(svg);
+      removeTransformEditor(svg);
       removeConnectorPreview(svg);
       removeConnectorToolPorts(svg);
       removeConnectorEndpointPreview(svg);
       removeConnectorEndpointEditor(svg);
       connectorController = null;
       endpointController = null;
+      transformController = null;
       endpointSelection = null;
+      transformSelection = null;
       clearSelection();
       host.replaceChildren();
       svg = null;
@@ -513,13 +655,17 @@ export function createCandidateSvgSurface(
       disposePointerBinding = null;
       removeMoveOverlay(svg);
       removeSnapGuides(svg);
+      removeTransformPreview(svg);
+      removeTransformEditor(svg);
       removeConnectorPreview(svg);
       removeConnectorToolPorts(svg);
       removeConnectorEndpointPreview(svg);
       removeConnectorEndpointEditor(svg);
       connectorController = null;
       endpointController = null;
+      transformController = null;
       endpointSelection = null;
+      transformSelection = null;
       clearSelection();
       host.replaceChildren();
       svg = null;
@@ -583,6 +729,192 @@ function removeMoveOverlay(svg) {
   for (const source of svg.querySelectorAll(`[${MOVING_SOURCE_ATTRIBUTE}]`)) {
     source.removeAttribute(MOVING_SOURCE_ATTRIBUTE);
   }
+}
+
+
+function removeTransformEditor(svg) {
+  if (!svg) {
+    return;
+  }
+  for (const editor of svg.querySelectorAll(`[${TRANSFORM_EDITOR_ATTRIBUTE}]`)) {
+    editor.remove();
+  }
+}
+
+function removeTransformPreview(svg) {
+  if (!svg) {
+    return;
+  }
+  for (const preview of svg.querySelectorAll(`[${TRANSFORM_PREVIEW_ATTRIBUTE}]`)) {
+    preview.remove();
+  }
+  for (const source of svg.querySelectorAll(`[${TRANSFORM_SOURCE_ATTRIBUTE}]`)) {
+    source.removeAttribute(TRANSFORM_SOURCE_ATTRIBUTE);
+  }
+}
+
+function renderTransformEditor(svg, selection) {
+  removeTransformEditor(svg);
+  if (!svg || !selection) {
+    return;
+  }
+  const bounds = selection.boundsMm;
+  const rotationDeg = selection.rotationDeg;
+  const group = document.createElementNS(SVG_NS, "g");
+  group.setAttribute(TRANSFORM_EDITOR_ATTRIBUTE, "true");
+  group.setAttribute("aria-hidden", "true");
+
+  const frame = document.createElementNS(SVG_NS, "rect");
+  frame.setAttribute(TRANSFORM_FRAME_ATTRIBUTE, "true");
+  frame.setAttribute("x", formatFinite(bounds.x));
+  frame.setAttribute("y", formatFinite(bounds.y));
+  frame.setAttribute("width", formatFinite(bounds.width));
+  frame.setAttribute("height", formatFinite(bounds.height));
+  frame.setAttribute("pointer-events", "none");
+  applyElementRotation(frame, bounds, rotationDeg);
+  group.append(frame);
+
+  const mmPerPx = endpointMmPerPx(svg);
+  const radius = Math.max(mmPerPx * 4, 0.45);
+  const rotateOffset = Math.max(mmPerPx * 18, 4);
+  const handleAxes = {
+    nw: [-1, -1],
+    n: [0, -1],
+    ne: [1, -1],
+    e: [1, 0],
+    se: [1, 1],
+    s: [0, 1],
+    sw: [-1, 1],
+    w: [-1, 0],
+  };
+  for (const [handleName, [axisX, axisY]] of Object.entries(handleAxes)) {
+    const point = rotateLocalPoint(
+      bounds,
+      rotationDeg,
+      (axisX * bounds.width) / 2,
+      (axisY * bounds.height) / 2,
+    );
+    group.append(
+      createTransformHandle(selection.elementId, handleName, point, radius),
+    );
+  }
+
+  const topCenter = rotateLocalPoint(bounds, rotationDeg, 0, -bounds.height / 2);
+  const rotatePoint = rotateLocalPoint(
+    bounds,
+    rotationDeg,
+    0,
+    -bounds.height / 2 - rotateOffset,
+  );
+  const guide = document.createElementNS(SVG_NS, "line");
+  guide.setAttribute(TRANSFORM_ROTATE_GUIDE_ATTRIBUTE, "true");
+  guide.setAttribute("x1", formatFinite(topCenter.x));
+  guide.setAttribute("y1", formatFinite(topCenter.y));
+  guide.setAttribute("x2", formatFinite(rotatePoint.x));
+  guide.setAttribute("y2", formatFinite(rotatePoint.y));
+  guide.setAttribute("pointer-events", "none");
+  group.append(guide);
+  group.append(
+    createTransformHandle(selection.elementId, "rotate", rotatePoint, radius * 1.1),
+  );
+  svg.append(group);
+}
+
+function createTransformHandle(elementId, handleName, point, radius) {
+  const handle = document.createElementNS(SVG_NS, "circle");
+  handle.setAttribute(TRANSFORM_HANDLE_ATTRIBUTE, handleName);
+  handle.setAttribute(TRANSFORM_ELEMENT_ID_ATTRIBUTE, elementId);
+  handle.setAttribute("cx", formatFinite(point.x));
+  handle.setAttribute("cy", formatFinite(point.y));
+  handle.setAttribute("r", formatFinite(radius));
+  handle.setAttribute("tabindex", "-1");
+  return handle;
+}
+
+function renderTransformPreview(svg, preview) {
+  removeTransformPreview(svg);
+  if (!svg || preview?.kind !== "transform-preview") {
+    return;
+  }
+  const source = findRenderableElement(svg, preview.elementId);
+  source?.setAttribute(TRANSFORM_SOURCE_ATTRIBUTE, "true");
+  const frame = document.createElementNS(SVG_NS, "rect");
+  frame.setAttribute(TRANSFORM_PREVIEW_ATTRIBUTE, "true");
+  frame.setAttribute("x", formatFinite(preview.boundsMm.x));
+  frame.setAttribute("y", formatFinite(preview.boundsMm.y));
+  frame.setAttribute("width", formatFinite(preview.boundsMm.width));
+  frame.setAttribute("height", formatFinite(preview.boundsMm.height));
+  frame.setAttribute("pointer-events", "none");
+  frame.setAttribute("aria-hidden", "true");
+  applyElementRotation(frame, preview.boundsMm, preview.rotationDeg);
+  svg.append(frame);
+}
+
+function normalizeTransformSelection(selection) {
+  if (selection == null || selection.geometryEditable === false) {
+    return null;
+  }
+  const bounds = selection.boundsMm;
+  if (
+    typeof selection.elementId !== "string" ||
+    selection.elementId.length === 0 ||
+    !Number.isFinite(bounds?.x) ||
+    !Number.isFinite(bounds?.y) ||
+    !Number.isFinite(bounds?.width) ||
+    !Number.isFinite(bounds?.height) ||
+    bounds.width <= 0 ||
+    bounds.height <= 0 ||
+    !Number.isFinite(selection.rotationDeg)
+  ) {
+    throw new TypeError("transform selection must contain finite editable geometry");
+  }
+  return Object.freeze({
+    elementId: selection.elementId,
+    boundsMm: Object.freeze({ ...bounds }),
+    rotationDeg: selection.rotationDeg,
+  });
+}
+
+function rotateLocalPoint(bounds, rotationDeg, localX, localY) {
+  const centerX = bounds.x + bounds.width / 2;
+  const centerY = bounds.y + bounds.height / 2;
+  const radians = (rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return {
+    x: centerX + localX * cos - localY * sin,
+    y: centerY + localX * sin + localY * cos,
+  };
+}
+
+function applyElementRotation(element, bounds, rotationDeg) {
+  if (rotationDeg === 0) {
+    return;
+  }
+  element.setAttribute(
+    "transform",
+    `rotate(${formatFinite(rotationDeg)} ${formatFinite(bounds.x + bounds.width / 2)} ${formatFinite(bounds.y + bounds.height / 2)})`,
+  );
+}
+
+function cancelTransformGesture(svg, controller) {
+  if (!controller?.isActive) {
+    removeTransformPreview(svg);
+    return false;
+  }
+  const pointerId = controller.activePointerId;
+  const cancelled = controller.cancel(pointerId);
+  if (cancelled && pointerId !== null) {
+    try {
+      if (svg?.hasPointerCapture?.(pointerId) !== false) {
+        svg?.releasePointerCapture?.(pointerId);
+      }
+    } catch {
+      // Pointer capture can already be gone during teardown.
+    }
+  }
+  removeTransformPreview(svg);
+  return cancelled;
 }
 
 function removeConnectorPreview(svg) {
