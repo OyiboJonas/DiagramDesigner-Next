@@ -576,7 +576,7 @@ dependencies = [
 
 [[package]]
 name = "diagram-designer-next-desktop"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "app-core",
  "ddnx",

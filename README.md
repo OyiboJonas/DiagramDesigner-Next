@@ -2,11 +2,20 @@
 
 Modern, migration-safe successor to Diagram Designer.
 
-> Status: Phase 1 — SVG selected as production renderer
+> Status: 0.1.0-alpha.1 candidate — Windows desktop alpha
 
 DiagramDesigner Next is an independent architectural rewrite with explicit compatibility tooling for legacy `.ddd` and `.ddt` documents. The original `meesoft/DiagramDesigner` project is used as the functional and legacy-format reference; see `THIRD_PARTY_NOTICES.md`.
 
 Phase 0 established the bounded legacy decoding/migration boundary, renderer-independent `next-domain` model and deterministic DDNX persistence. Phase 1 builds the editor foundation, desktop persistence/recovery, interaction model and replaceable renderer boundary on top of that foundation.
+
+
+## 0.1 Windows alpha
+
+The first alpha packages the current editor foundation into one functional Windows workflow: native DDNX open/save, migration-safe `.ddd`/`.ddt` import, crash recovery, pages/layers, basic shapes and text, straight/orthogonal connectors with ports, selection/move/snapping, direct resize/rotation, basic appearance, and Undo/Redo.
+
+The alpha remains intentionally conservative around persistence: legacy sources are import-only, first-save overwrite is refused until a dedicated confirmation flow exists, and dirty window close writes a fresh atomic recovery checkpoint before the native window is allowed to close. The WebView still receives no broad filesystem or shell capability.
+
+The unsigned portable Windows artifact and the exact alpha smoke path/known limitations are documented in [`docs/testing/alpha-0.1.md`](docs/testing/alpha-0.1.md).
 
 ## Phase-1 renderer decision
 

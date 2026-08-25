@@ -1,6 +1,7 @@
 import { createSvgKeyboardSurface } from './svg-keyboard.mjs';
 import { createSvgSurface } from './svg-surface.mjs';
 import { buildRulerTicks } from './editor-interaction/snapping.mjs';
+import { isTextEditingTarget, resolveApplicationShortcut } from './editor-interaction/app-shortcuts.mjs';
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -25,6 +26,8 @@ const elements = {
   pageCount: document.querySelector('#page-count'),
   historyState: document.querySelector('#history-state'),
   rendererStats: document.querySelector('#renderer-stats'),
+  appVersion: document.querySelector('#app-version'),
+  statusTech: document.querySelector('#status-tech'),
   pageSelect: document.querySelector('#page-select'),
   addPage: document.querySelector('#add-page'),
   deletePage: document.querySelector('#delete-page'),
@@ -190,7 +193,9 @@ function renderState(state) {
 
   elements.pageCount.textContent = String(state.pageCount);
   elements.historyState.textContent = String(state.historyState);
-  document.title = `${state.dirty ? '● ' : ''}${state.name} — DiagramDesigner Next`;
+  elements.appVersion.textContent = `Alpha · ${state.version}`;
+  elements.statusTech.textContent = `Tauri 2 · DDNX · ${state.version}`;
+  document.title = `${state.dirty ? '● ' : ''}${state.name} — DiagramDesigner Next Alpha ${state.version}`;
 }
 
 function updateStructureDisabledState() {
@@ -1154,7 +1159,8 @@ elements.appearanceForm.addEventListener('submit', (event) => {
 elements.appearanceStrokeEnabled.addEventListener('change', updateAppearanceEnabledState);
 elements.appearanceFillEnabled.addEventListener('change', updateAppearanceEnabledState);
 
-elements.saveDocument.addEventListener('click', () => {
+
+function saveCurrentDocument() {
   void runAction(
     'save_document',
     undefined,
@@ -1166,21 +1172,27 @@ elements.saveDocument.addEventListener('click', () => {
     },
     { syncRecovery: true },
   );
-});
+}
 
-elements.undo.addEventListener('click', () => {
+function undoCurrentDocument() {
   void runAction('undo', undefined, () => 'Undo', {
     syncRecovery: true,
     refreshPresentation: true,
   });
-});
+}
 
-elements.redo.addEventListener('click', () => {
+function redoCurrentDocument() {
   void runAction('redo', undefined, () => 'Redo', {
     syncRecovery: true,
     refreshPresentation: true,
   });
-});
+}
+
+elements.saveDocument.addEventListener('click', saveCurrentDocument);
+
+elements.undo.addEventListener('click', undoCurrentDocument);
+
+elements.redo.addEventListener('click', redoCurrentDocument);
 
 elements.toggleGrid.addEventListener('click', () => {
   interactionSettings.gridVisible = !interactionSettings.gridVisible;
@@ -1219,7 +1231,44 @@ elements.recoveryDialog.addEventListener('cancel', (event) => {
 window.addEventListener(
   'keydown',
   (event) => {
-    if (event.key !== 'Escape' || elements.recoveryDialog.open) {
+    if (elements.recoveryDialog.open) {
+      return;
+    }
+
+    if (!isBusy) {
+      const shortcut = resolveApplicationShortcut(
+        {
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+        },
+        { textEditing: isTextEditingTarget(event.target) },
+      );
+      if (shortcut) {
+        if (
+          shortcut === 'delete-selection' &&
+          Number(currentSelectionProperties?.count ?? 0) === 0
+        ) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        if (shortcut === 'save') {
+          saveCurrentDocument();
+        } else if (shortcut === 'undo') {
+          undoCurrentDocument();
+        } else if (shortcut === 'redo') {
+          redoCurrentDocument();
+        } else if (shortcut === 'delete-selection') {
+          void deleteCurrentSelection();
+        }
+        return;
+      }
+    }
+
+    if (event.key !== 'Escape') {
       return;
     }
     if (svgSurface.cancelTransformGesture()) {
@@ -1246,6 +1295,9 @@ window.addEventListener(
 window.diagramDesignerNext = Object.freeze({
   scheduleRecoverySync,
   refreshPresentation,
+  reportCloseCheckpointError(message) {
+    setStatus(`Close blocked: recovery checkpoint failed: ${String(message)}`);
+  },
 });
 
 void initializeDesktop();
