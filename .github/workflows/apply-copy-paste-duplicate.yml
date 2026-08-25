@@ -18,7 +18,7 @@ jobs:
           ref: desktop-copy-paste-duplicate
           fetch-depth: 0
       - name: Apply structured clipboard patch
-        run: python scripts/apply-copy-paste-duplicate.py
+        run: python scripts/run-copy-paste-patch.py
       - name: Format Rust changes
         run: |
           cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
