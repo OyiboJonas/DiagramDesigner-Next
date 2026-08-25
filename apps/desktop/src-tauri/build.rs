@@ -29,6 +29,7 @@ fn main() {
             "selection_properties",
             "create_basic_element",
             "create_connector",
+            "set_connector_endpoint",
             "delete_selection",
             "update_element_properties",
             "new_document",

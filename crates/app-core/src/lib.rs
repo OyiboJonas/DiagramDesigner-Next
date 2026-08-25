@@ -3,13 +3,16 @@ use ddnx::{
     compare_persistence, prepare_package, read_package, write_package_to_vec,
 };
 use editor_core::{
-    ConnectorEndpointSide as CoreConnectorEndpointSide, EditCommand, EditTransaction, EditorError,
+    ConnectorEndpointSide as CoreConnectorEndpointSide,
+    ConnectorEndpointSnapshot as CoreConnectorEndpointSnapshot,
+    ConnectorGeometryKind as CoreConnectorGeometryKind, EditCommand, EditTransaction, EditorError,
     EditorSession, HistoryStateId, LayerScope, LayerTarget,
+    ResolvedPortPosition as CoreResolvedPortPosition,
 };
 use editor_runtime::{EditorRuntime, RecoveryCheckpointKey, RecoveryPlan};
 use next_domain::{
-    Color, Connection, Element, ElementId, Layer, LayerId, NextArtifact, Page, PageId, Point, Rect,
-    Size, TextBlock,
+    Color, Connection, Element, ElementId, Layer, LayerId, NextArtifact, Page, PageId, Point,
+    PortId, Rect, Size, TextBlock,
 };
 use thiserror::Error;
 
@@ -26,6 +29,64 @@ impl From<ConnectorEndpointSide> for CoreConnectorEndpointSide {
         match value {
             ConnectorEndpointSide::Start => Self::Start,
             ConnectorEndpointSide::End => Self::End,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectorGeometryKind {
+    Straight,
+    Orthogonal,
+    Curve,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConnectorEndpointState {
+    pub position_mm: Point,
+    pub connection: Option<Connection>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConnectorEndpoints {
+    pub kind: ConnectorGeometryKind,
+    pub start: ConnectorEndpointState,
+    pub end: ConnectorEndpointState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ConnectorPortPosition {
+    pub element_id: ElementId,
+    pub port_id: PortId,
+    pub position_mm: Point,
+}
+
+impl From<CoreConnectorEndpointSnapshot> for ConnectorEndpoints {
+    fn from(value: CoreConnectorEndpointSnapshot) -> Self {
+        let kind = match value.kind {
+            CoreConnectorGeometryKind::Straight => ConnectorGeometryKind::Straight,
+            CoreConnectorGeometryKind::Orthogonal => ConnectorGeometryKind::Orthogonal,
+            CoreConnectorGeometryKind::Curve => ConnectorGeometryKind::Curve,
+        };
+        Self {
+            kind,
+            start: ConnectorEndpointState {
+                position_mm: value.start.position_mm,
+                connection: value.start.connection,
+            },
+            end: ConnectorEndpointState {
+                position_mm: value.end.position_mm,
+                connection: value.end.connection,
+            },
+        }
+    }
+}
+
+impl From<CoreResolvedPortPosition> for ConnectorPortPosition {
+    fn from(value: CoreResolvedPortPosition) -> Self {
+        Self {
+            element_id: value.element_id,
+            port_id: value.port_id,
+            position_mm: value.position_mm,
         }
     }
 }
@@ -219,6 +280,55 @@ impl ApplicationSession {
             position_mm,
             connection,
         })
+    }
+
+    /// Read one connector's canonical endpoint state without exposing editor-core types.
+    pub fn connector_endpoints(
+        &self,
+        element_id: ElementId,
+    ) -> Result<Option<ConnectorEndpoints>, ApplicationError> {
+        Ok(self
+            .runtime
+            .session()
+            .connector_endpoint_snapshot(element_id)?
+            .map(ConnectorEndpoints::from))
+    }
+
+    /// Return hit-testable ports only for the active visible, unlocked page-local layer.
+    pub fn active_page_layer_ports(&self) -> Result<Vec<ConnectorPortPosition>, ApplicationError> {
+        let session = self.runtime.session();
+        let Some(page_id) = session.active_page_id() else {
+            return Ok(Vec::new());
+        };
+        let Some(LayerTarget::Page {
+            page_id: layer_page_id,
+            layer_id,
+        }) = session.active_layer()
+        else {
+            return Ok(Vec::new());
+        };
+        if layer_page_id != page_id {
+            return Ok(Vec::new());
+        }
+        let page = session
+            .document()
+            .pages
+            .iter()
+            .find(|page| page.id == page_id)
+            .ok_or(EditorError::PageNotFound(page_id))?;
+        let layer = page
+            .layers
+            .iter()
+            .find(|layer| layer.id == layer_id)
+            .ok_or(EditorError::LayerNotFound(layer_id))?;
+        if !layer.visible || layer.locked {
+            return Ok(Vec::new());
+        }
+        Ok(session
+            .resolved_ports(LayerTarget::Page { page_id, layer_id })?
+            .into_iter()
+            .map(ConnectorPortPosition::from)
+            .collect())
     }
 
     /// Delete a selection as one semantic history step.
@@ -630,6 +740,19 @@ mod tests {
         };
         assert_eq!(connector.start.connection.unwrap().element_id, target_id);
         assert_eq!(connector.start.position_mm, Point { x: 30.0, y: 35.0 });
+        let endpoints = application.connector_endpoints(source_id).unwrap().unwrap();
+        assert_eq!(endpoints.kind, ConnectorGeometryKind::Straight);
+        assert_eq!(endpoints.start.position_mm, Point { x: 30.0, y: 35.0 });
+        assert_eq!(endpoints.start.connection.unwrap().port_id, port_id);
+        let ports = application.active_page_layer_ports().unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].element_id, target_id);
+        assert_eq!(ports[0].port_id, port_id);
+        assert_eq!(ports[0].position_mm, Point { x: 30.0, y: 35.0 });
+        application
+            .set_page_layer_properties(page_id, layer_id, "Layer".to_owned(), false, false, None)
+            .unwrap();
+        assert!(application.active_page_layer_ports().unwrap().is_empty());
         assert!(application.is_dirty());
     }
 

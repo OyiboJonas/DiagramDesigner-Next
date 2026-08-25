@@ -444,6 +444,47 @@ button.toggle-button[aria-pressed="true"] {
   opacity: 0.95;
 }
 
+.candidate-svg-document [data-ddn-connector-endpoint-editor] {
+  pointer-events: none;
+}
+
+.candidate-svg-document [data-ddn-connector-endpoint-handle] {
+  fill: var(--surface);
+  stroke: var(--selection);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+  cursor: crosshair;
+}
+
+.candidate-svg-document [data-ddn-connector-endpoint-handle]:hover {
+  fill: var(--selection-soft);
+  stroke-width: 2.5px;
+}
+
+.candidate-svg-document [data-ddn-connector-port-handle] {
+  fill: var(--surface);
+  stroke: var(--selection);
+  stroke-width: 1.4px;
+  opacity: 0.72;
+  vector-effect: non-scaling-stroke;
+}
+
+.candidate-svg-document [data-ddn-connector-port-snapped="true"] {
+  fill: var(--selection);
+  opacity: 1;
+  stroke-width: 2.2px;
+}
+
+.candidate-svg-document [data-ddn-connector-endpoint-preview] {
+  fill: none;
+  stroke: var(--selection);
+  stroke-width: 2px;
+  stroke-dasharray: 5 3;
+  opacity: 0.92;
+  vector-effect: non-scaling-stroke;
+}
+
 .statusbar {
   justify-content: space-between;
   gap: 16px;

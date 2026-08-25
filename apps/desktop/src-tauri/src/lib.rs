@@ -8,14 +8,19 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use app_core::ApplicationSession;
+use app_core::{
+    ApplicationSession, ConnectorEndpointSide as AppConnectorEndpointSide,
+    ConnectorEndpointState as AppConnectorEndpointState,
+    ConnectorEndpoints as AppConnectorEndpoints, ConnectorGeometryKind as AppConnectorGeometryKind,
+};
 use ddnx::PackageLimits;
 use editor_runtime::RecoveryPlan;
 use next_domain::{
-    AnchorSet, Connector, ConnectorLabelStyle, Document, DocumentDefaults, DocumentId, Element,
-    ElementId, ElementKind, Endpoint, Layer, LayerId, LineStyle, MarkerStyle, NextArtifact, Page,
-    PageId, Point, Rect, RichTextDocument, RichTextToken, Scene, Size, TextBlock,
-    TextHorizontalAlignment, TextLayout, TextStyle, TextVerticalAlignment,
+    AnchorSet, Connection, Connector, ConnectorLabelStyle, Document, DocumentDefaults, DocumentId,
+    Element, ElementId, ElementKind, Endpoint, Layer, LayerId, LineStyle, MarkerStyle,
+    NextArtifact, NormalizedPoint, Page, PageId, Point, Port, PortId, Rect, RichTextDocument,
+    RichTextToken, Scene, Size, TextBlock, TextHorizontalAlignment, TextLayout, TextStyle,
+    TextVerticalAlignment,
 };
 use platform_fs::{AtomicSaveError, CommitMode, DurabilityLevel, atomic_save};
 use render_plan::{RenderPlanOptions, build_page_plan};
@@ -124,6 +129,7 @@ struct CandidatePagePresentationDto {
     width_mm: f64,
     height_mm: f64,
     snap_elements: Vec<SnapElementDto>,
+    port_targets: Vec<PortTargetDto>,
     svg: String,
     rendered_elements: usize,
     skipped_elements: usize,
@@ -138,6 +144,14 @@ struct SnapElementDto {
     element_id: ElementId,
     bounds_mm: Rect,
     rotation_deg: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PortTargetDto {
+    element_id: ElementId,
+    port_id: PortId,
+    position_mm: Point,
 }
 
 #[derive(Debug, Serialize)]
@@ -229,6 +243,22 @@ struct CreateConnectorRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ConnectorEndpointSideRequest {
+    Start,
+    End,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetConnectorEndpointRequest {
+    element_id: ElementId,
+    side: ConnectorEndpointSideRequest,
+    position_mm: Point,
+    connection: Option<Connection>,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateElementPropertiesRequest {
     element_id: ElementId,
@@ -262,6 +292,29 @@ struct ElementPropertiesDto {
     text: Option<String>,
     text_editable: bool,
     geometry_editable: bool,
+    connector: Option<ConnectorPropertiesDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectorPropertiesDto {
+    kind: &'static str,
+    start: ConnectorEndpointDto,
+    end: ConnectorEndpointDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectorEndpointDto {
+    position_mm: Point,
+    connection: Option<ConnectorConnectionDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectorConnectionDto {
+    element_id: ElementId,
+    port_id: PortId,
 }
 
 #[derive(Debug, Deserialize)]
@@ -687,6 +740,17 @@ fn candidate_page_presentation(
             rotation_deg: item.element.rotation_deg,
         })
         .collect();
+    let port_targets = document
+        .session
+        .active_page_layer_ports()
+        .map_err(|error| CommandError::new("connector_ports_failed", error.to_string()))?
+        .into_iter()
+        .map(|port| PortTargetDto {
+            element_id: port.element_id,
+            port_id: port.port_id,
+            position_mm: port.position_mm,
+        })
+        .collect();
     let rendered = render_plan_to_svg(
         session.document(),
         page_id,
@@ -701,6 +765,7 @@ fn candidate_page_presentation(
         width_mm: page.size_mm.width,
         height_mm: page.size_mm.height,
         snap_elements,
+        port_targets,
         svg: rendered.svg,
         rendered_elements: rendered.rendered_elements,
         skipped_elements: rendered.skipped_elements,
@@ -747,7 +812,11 @@ fn selection_properties(
                 "The selected element no longer exists in the current document.",
             )
         })?;
-        Some(element_properties_dto(element))
+        let connector = document
+            .session
+            .connector_endpoints(element.id)
+            .map_err(|error| CommandError::new("connector_query_failed", error.to_string()))?;
+        Some(element_properties_dto(element, connector))
     } else {
         None
     };
@@ -819,7 +888,7 @@ fn create_basic_element(
         bounds_mm,
         rotation_deg: 0.0,
         anchors: AnchorSet::default(),
-        ports: Vec::new(),
+        ports: default_shape_ports(),
         style_id: None,
         text,
         kind,
@@ -948,6 +1017,79 @@ fn create_connector(
     document
         .session
         .set_selection([element_id])
+        .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
+    Ok(element_edit_result_dto(&document))
+}
+
+#[tauri::command]
+fn set_connector_endpoint(
+    request: SetConnectorEndpointRequest,
+    state: State<'_, DesktopState>,
+) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let page_size = {
+        let session = document.session.session();
+        let page_id = session.active_page_id().ok_or_else(|| {
+            CommandError::new("no_active_page", "The current document has no active page.")
+        })?;
+        let layer_id = document.session.active_page_layer_id().ok_or_else(|| {
+            CommandError::new(
+                "no_active_page_layer",
+                "Choose a page-local layer before editing connector endpoints.",
+            )
+        })?;
+        let page = session
+            .document()
+            .pages
+            .iter()
+            .find(|page| page.id == page_id)
+            .ok_or_else(|| {
+                CommandError::new("page_missing", "The active page no longer exists.")
+            })?;
+        let layer = page
+            .layers
+            .iter()
+            .find(|layer| layer.id == layer_id)
+            .ok_or_else(|| {
+                CommandError::new("layer_missing", "The active layer no longer exists.")
+            })?;
+        if !layer.visible {
+            return Err(CommandError::new(
+                "connector_layer_hidden",
+                "Connector endpoints can be edited only on a visible layer.",
+            ));
+        }
+        if layer.locked {
+            return Err(CommandError::new(
+                "connector_layer_locked",
+                "Unlock the active layer before editing connector endpoints.",
+            ));
+        }
+        if !layer
+            .scene
+            .elements
+            .iter()
+            .any(|element| element.id == request.element_id)
+        {
+            return Err(CommandError::new(
+                "connector_not_on_active_layer",
+                "The connector must belong to the active page-local layer.",
+            ));
+        }
+        page.size_mm
+    };
+    let position_mm = clamp_connector_point(request.position_mm, page_size)?;
+    let side = match request.side {
+        ConnectorEndpointSideRequest::Start => AppConnectorEndpointSide::Start,
+        ConnectorEndpointSideRequest::End => AppConnectorEndpointSide::End,
+    };
+    document
+        .session
+        .set_connector_endpoint(request.element_id, side, position_mm, request.connection)
+        .map_err(|error| CommandError::new("connector_endpoint_failed", error.to_string()))?;
+    document
+        .session
+        .set_selection([request.element_id])
         .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
     Ok(element_edit_result_dto(&document))
 }
@@ -1445,7 +1587,10 @@ fn find_element(document: &Document, element_id: ElementId) -> Option<&Element> 
         })
 }
 
-fn element_properties_dto(element: &Element) -> ElementPropertiesDto {
+fn element_properties_dto(
+    element: &Element,
+    connector: Option<AppConnectorEndpoints>,
+) -> ElementPropertiesDto {
     let (text, text_editable) = match element.text.as_ref() {
         Some(block) => {
             let (preview, editable, _) = text_preview(block);
@@ -1462,6 +1607,32 @@ fn element_properties_dto(element: &Element) -> ElementPropertiesDto {
         text,
         text_editable,
         geometry_editable: element_geometry_editable(&element.kind),
+        connector: connector.and_then(connector_properties_dto),
+    }
+}
+
+fn connector_properties_dto(connector: AppConnectorEndpoints) -> Option<ConnectorPropertiesDto> {
+    let kind = match connector.kind {
+        AppConnectorGeometryKind::Straight => "straight",
+        AppConnectorGeometryKind::Orthogonal => "orthogonal",
+        AppConnectorGeometryKind::Curve => return None,
+    };
+    Some(ConnectorPropertiesDto {
+        kind,
+        start: connector_endpoint_dto(connector.start),
+        end: connector_endpoint_dto(connector.end),
+    })
+}
+
+fn connector_endpoint_dto(endpoint: AppConnectorEndpointState) -> ConnectorEndpointDto {
+    ConnectorEndpointDto {
+        position_mm: endpoint.position_mm,
+        connection: endpoint
+            .connection
+            .map(|connection| ConnectorConnectionDto {
+                element_id: connection.element_id,
+                port_id: connection.port_id,
+            }),
     }
 }
 
@@ -1549,6 +1720,22 @@ fn connector_bounds(start_mm: Point, end_mm: Point) -> Rect {
         width: (start_mm.x - end_mm.x).abs().max(0.1),
         height: (start_mm.y - end_mm.y).abs().max(0.1),
     }
+}
+
+fn default_shape_ports() -> Vec<Port> {
+    [
+        (0_u16, 0.5, 0.0),
+        (1_u16, 1.0, 0.5),
+        (2_u16, 0.5, 1.0),
+        (3_u16, 0.0, 0.5),
+    ]
+    .into_iter()
+    .map(|(index, x, y)| Port {
+        id: PortId::new(),
+        index,
+        position: NormalizedPoint { x, y },
+    })
+    .collect()
 }
 
 fn simple_text_block(text: &str, style: TextStyle, layout: Option<TextLayout>) -> TextBlock {
@@ -1775,6 +1962,7 @@ pub fn run() {
             selection_properties,
             create_basic_element,
             create_connector,
+            set_connector_endpoint,
             delete_selection,
             update_element_properties,
             new_document,

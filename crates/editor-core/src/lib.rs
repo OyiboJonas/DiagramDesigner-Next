@@ -55,6 +55,27 @@ pub enum ConnectorEndpointSide {
     End,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectorGeometryKind {
+    Straight,
+    Orthogonal,
+    Curve,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConnectorEndpointSnapshot {
+    pub kind: ConnectorGeometryKind,
+    pub start: Endpoint,
+    pub end: Endpoint,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResolvedPortPosition {
+    pub element_id: ElementId,
+    pub port_id: PortId,
+    pub position_mm: Point,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
     CreatePage {
@@ -682,6 +703,53 @@ impl EditorSession {
 
     pub fn clear_selection(&mut self) {
         self.selection.clear();
+    }
+
+    /// Read canonical connector endpoint state without exposing mutable document access.
+    pub fn connector_endpoint_snapshot(
+        &self,
+        element_id: ElementId,
+    ) -> Result<Option<ConnectorEndpointSnapshot>, EditorError> {
+        let element = find_element(&self.document, element_id)
+            .ok_or(EditorError::ElementNotFound(element_id))?;
+        let (kind, connector) = match &element.kind {
+            ElementKind::StraightConnector { connector } => {
+                (ConnectorGeometryKind::Straight, connector)
+            }
+            ElementKind::OrthogonalConnector { connector, .. } => {
+                (ConnectorGeometryKind::Orthogonal, connector)
+            }
+            ElementKind::Curve {
+                connector: Some(connector),
+                ..
+            } => (ConnectorGeometryKind::Curve, connector),
+            _ => return Ok(None),
+        };
+        Ok(Some(ConnectorEndpointSnapshot {
+            kind,
+            start: connector.start.clone(),
+            end: connector.end.clone(),
+        }))
+    }
+
+    /// Resolve every port in one scene to its canonical document-space position.
+    pub fn resolved_ports(
+        &self,
+        target: LayerTarget,
+    ) -> Result<Vec<ResolvedPortPosition>, EditorError> {
+        let layer = find_layer(&self.document, target)
+            .ok_or(EditorError::LayerNotFound(layer_id_of(target)))?;
+        let mut ports = Vec::new();
+        for element in &layer.scene.elements {
+            for port in &element.ports {
+                ports.push(ResolvedPortPosition {
+                    element_id: element.id,
+                    port_id: port.id,
+                    position_mm: port_document_position(element, port.id)?,
+                });
+            }
+        }
+        Ok(ports)
     }
 
     pub fn current_history_state(&self) -> HistoryStateId {
@@ -1332,6 +1400,7 @@ fn apply_set_connector_endpoint(
         side,
     );
     *endpoint = next;
+    refresh_connector_bounds(document, element_id)?;
 
     Ok(Some(AppliedCommand {
         undo: UndoStep::SetConnectorEndpoint {
@@ -1865,6 +1934,7 @@ fn apply_undo_step(document: &mut Document, step: &UndoStep) -> Result<(), Edito
                 connector_mut(element).ok_or(EditorError::HistoryInvariantViolation)?,
                 *side,
             ) = endpoint.clone();
+            refresh_connector_bounds(document, *element_id)?;
             synchronize_connected_endpoints(document)?;
         }
         UndoStep::SetElementStyles { previous } => {
@@ -2241,6 +2311,7 @@ fn synchronize_connected_endpoints(document: &mut Document) -> Result<(), Editor
         }
     }
 
+    let mut touched = BTreeSet::new();
     for (element_id, side, position) in updates {
         let element =
             find_element_mut(document, element_id).ok_or(EditorError::HistoryInvariantViolation)?;
@@ -2249,7 +2320,30 @@ fn synchronize_connected_endpoints(document: &mut Document) -> Result<(), Editor
             side,
         )
         .position_mm = position;
+        touched.insert(element_id);
     }
+    for element_id in touched {
+        refresh_connector_bounds(document, element_id)?;
+    }
+    Ok(())
+}
+
+fn refresh_connector_bounds(
+    document: &mut Document,
+    element_id: ElementId,
+) -> Result<(), EditorError> {
+    let element =
+        find_element_mut(document, element_id).ok_or(EditorError::HistoryInvariantViolation)?;
+    let (start, end) = {
+        let connector = connector_mut(element).ok_or(EditorError::HistoryInvariantViolation)?;
+        (connector.start.position_mm, connector.end.position_mm)
+    };
+    element.bounds_mm = Rect {
+        x: start.x.min(end.x),
+        y: start.y.min(end.y),
+        width: (start.x - end.x).abs().max(0.1),
+        height: (start.y - end.y).abs().max(0.1),
+    };
     Ok(())
 }
 
@@ -2885,6 +2979,28 @@ mod tests {
         let connected = connector_endpoint_value(&session, source, ConnectorEndpointSide::Start);
         assert_eq!(connected.connection, Some(connection));
         assert_eq!(connected.position_mm, Point { x: 30.0, y: 32.5 });
+        assert_eq!(
+            bounds(&session, source),
+            Rect {
+                x: 11.0,
+                y: 7.0,
+                width: 19.0,
+                height: 25.5,
+            }
+        );
+
+        let snapshot = session
+            .connector_endpoint_snapshot(source)
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot.kind, ConnectorGeometryKind::Straight);
+        assert_eq!(snapshot.start, connected);
+        let ports = session
+            .resolved_ports(session.active_layer().unwrap())
+            .unwrap();
+        assert!(ports.iter().any(|port| port.element_id == target
+            && port.port_id == port_id
+            && port.position_mm == Point { x: 30.0, y: 32.5 }));
 
         session.undo().unwrap();
         let free = connector_endpoint_value(&session, source, ConnectorEndpointSide::Start);
@@ -3007,6 +3123,15 @@ mod tests {
         assert_eq!(
             connector_endpoint_value(&session, source, ConnectorEndpointSide::Start).position_mm,
             Point { x: 35.0, y: 30.5 }
+        );
+        assert_eq!(
+            bounds(&session, source),
+            Rect {
+                x: 11.0,
+                y: 7.0,
+                width: 24.0,
+                height: 23.5,
+            }
         );
         session.undo().unwrap();
         assert_eq!(
