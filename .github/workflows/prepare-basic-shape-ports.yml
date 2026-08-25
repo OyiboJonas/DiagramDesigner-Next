@@ -1,0 +1,41 @@
+name: Prepare basic shape ports
+
+on:
+  push:
+    branches: [desktop-connector-port-editing]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-connector-port-editing
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Apply default shape ports
+        run: python scripts/prepare-basic-shape-ports.py
+      - name: Format desktop Rust
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Check desktop Rust
+        run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Verify patch
+        run: git diff --check
+      - name: Commit prepared shape ports
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm scripts/prepare-basic-shape-ports.py
+          rm .github/workflows/prepare-basic-shape-ports.yml
+          git config user.name "DiagramDesigner Next automation"
+          git config user.email "190651966+OyiboJonas@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Desktop: add default connector ports to basic shapes"
+          git push origin HEAD:desktop-connector-port-editing
