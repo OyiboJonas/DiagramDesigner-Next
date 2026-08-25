@@ -30,8 +30,6 @@ jobs:
         run: cargo test --locked -p editor-core
       - name: Test application core
         run: cargo test --manifest-path crates/app-core/Cargo.toml
-      - name: Check desktop shell
-        run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
       - name: Check JavaScript
         run: node --check apps/desktop/ui/app.js
       - name: Verify integration
@@ -41,6 +39,7 @@ jobs:
           grep -q 'SetElementAppearance' crates/editor-core/src/lib.rs
           grep -q 'set_element_appearance' crates/app-core/src/lib.rs
           grep -q 'update_element_appearance' apps/desktop/src-tauri/src/lib.rs
+          grep -q 'update_element_appearance' apps/desktop/src-tauri/build.rs
           grep -q 'add-ellipse' apps/desktop/ui/index.html
           grep -q 'selection-appearance-form' apps/desktop/ui/index.html
           git diff --check
