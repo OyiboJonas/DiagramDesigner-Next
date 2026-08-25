@@ -1,16 +1,14 @@
 name: Prepare connector port Rust boundary
 
 on:
-  pull_request:
-    branches: [main]
-    types: [synchronize, reopened]
+  push:
+    branches: [desktop-connector-port-editing]
 
 permissions:
   contents: write
 
 jobs:
   prepare:
-    if: github.head_ref == 'desktop-connector-port-editing'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,9 +21,6 @@ jobs:
           components: rustfmt,clippy
       - name: Apply connector port Rust boundary
         run: python scripts/prepare-connector-port-rust-boundary.py
-      - name: Remove ambiguous endpoint test tie
-        shell: bash
-        run: sed -i 's/xPx: 52, yPx: 50/xPx: 51, yPx: 50/g' web/editor-interaction/connector-endpoint-gesture.test.mjs
       - name: Format editor and application core
         run: |
           cargo fmt --manifest-path crates/editor-core/Cargo.toml
