@@ -1,0 +1,31 @@
+name: Format copy product
+
+on:
+  push:
+    branches:
+      - desktop-copy-paste-duplicate
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-copy-paste-duplicate
+          fetch-depth: 0
+      - name: Apply app-core rustfmt
+        run: cargo fmt --manifest-path crates/app-core/Cargo.toml
+      - name: Verify diff
+        run: git diff --check
+      - name: Commit formatting
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/app-core/src/lib.rs crates/app-core/tests/copy_appearance_transaction.rs
+          git commit -m "Style: format copy appearance changes"
+          git push origin HEAD:desktop-copy-paste-duplicate
