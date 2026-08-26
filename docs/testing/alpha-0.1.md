@@ -23,7 +23,8 @@ The `0.1.0-alpha.1` version label is still used while the native alpha smoke gat
 - z-order controls for top-level elements and structural groups;
 - Group/Ungroup with logical group selection and atomic group movement;
 - group-aware Copy/Paste/Duplicate that preserves nested group hierarchy and internal references;
-- explicit Save As with `Ctrl/Cmd+Shift+S`, plus native confirmation before a newly selected existing `.ddnx` destination is replaced.
+- explicit Save As with `Ctrl/Cmd+Shift+S`, plus native confirmation before a newly selected existing `.ddnx` destination is replaced;
+- connector start/end marker and line-style editing for straight and orthogonal connectors, including preservation of imported custom legacy style codes until explicitly replaced.
 
 These additions are covered by repository, frontend, DDNX and Windows/Tauri automation. They do **not** replace the outstanding human Windows GUI smoke required by the alpha-readiness gate, so the native smoke path below remains focused on the original alpha baseline.
 
@@ -44,6 +45,8 @@ These additions are covered by repository, frontend, DDNX and Windows/Tauri auto
 
 For current builds, also verify that Save As opens a new DDNX destination picker and that choosing an already-existing DDNX asks for explicit native confirmation. Choosing No/Cancel must leave the document and its current save association unchanged. A normal Save on an already-associated native DDNX continues to replace that exact file atomically without an additional overwrite prompt.
 
+Current builds also expose connector line and marker controls in the selection inspector. Standard start/end markers and line styles should update the rendered connector, Undo/Redo as one semantic edit and survive DDNX save/reopen. Imported custom marker/style codes are shown as legacy custom values and remain unchanged until deliberately replaced. Secondary colours used by Outline/UML/custom semantics retain imported system-palette values unless the colour is deliberately edited.
+
 ## Alpha close/recovery behavior
 
 Closing the main window with dirty, imported or recovered state does **not** silently discard the current document. Before the native window is allowed to close, the Rust desktop boundary writes a fresh, atomically persisted DDNX recovery checkpoint. On the next start, the existing recovery flow offers Restore or Discard. This checkpoint is not a normal Save and does not overwrite the user's document or legacy source.
@@ -55,7 +58,7 @@ If that recovery checkpoint cannot be written, the close request is blocked and 
 - Windows only for this alpha; no installer and no code signing.
 - Legacy `.ddd`/`.ddt` support is import-only. DiagramDesigner Next never writes those formats.
 - Rich/mixed legacy text can be displayed but the basic text field deliberately refuses destructive flattening of unsupported formatting or dynamic fields.
-- Basic appearance currently covers shape stroke/fill and text colour. Gradients, dash styles, connector markers and advanced text formatting are not editor controls yet.
+- Basic appearance covers shape stroke/fill, text colour, and standard connector markers/line styles. Gradients, advanced text formatting, and direct editing of arbitrary custom legacy connector style codes remain outside the current controls.
 - The executable depends on the Windows WebView2 runtime, normally present on current Windows 10/11 systems.
 
 ## Failure information
