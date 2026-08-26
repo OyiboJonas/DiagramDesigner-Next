@@ -813,7 +813,7 @@ fn candidate_page_presentation(
     // Snapping consumes renderer-neutral document geometry rather than SVG DOM
     // measurements. The candidate adapter can therefore be replaced after ADR-019
     // without changing the movement or snapping contract.
-    let selection_groups: Vec<_> = grouping::selection_groups(session.document())
+    let selection_groups: Vec<_> = grouping::selection_groups(session.document(), page_id)
         .into_iter()
         .map(|group| SelectionGroupDto {
             group_id: group.group_id,

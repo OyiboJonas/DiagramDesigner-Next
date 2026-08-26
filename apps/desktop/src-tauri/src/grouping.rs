@@ -16,12 +16,15 @@ pub(crate) struct SelectionCapabilities {
     pub contains_group: bool,
 }
 
-pub(crate) fn selection_groups(document: &Document) -> Vec<SelectionGroupSnapshot> {
+pub(crate) fn selection_groups(
+    document: &Document,
+    page_id: PageId,
+) -> Vec<SelectionGroupSnapshot> {
     let mut groups = Vec::new();
     for layer in document.master_layers.iter().filter(|layer| layer.visible) {
         collect_layer_selection_groups(layer, &mut groups);
     }
-    for page in &document.pages {
+    if let Some(page) = document.pages.iter().find(|page| page.id == page_id) {
         for layer in page.layers.iter().filter(|layer| layer.visible) {
             collect_layer_selection_groups(layer, &mut groups);
         }
@@ -290,11 +293,60 @@ mod tests {
 
     #[test]
     fn top_level_group_maps_to_rendered_leaf_descendants() {
-        let (document, _, _, ids) = fixture(false);
-        let groups = selection_groups(&document);
+        let (document, page_id, _, ids) = fixture(false);
+        let groups = selection_groups(&document, page_id);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].group_id, ids[0]);
         assert_eq!(groups[0].leaf_element_ids, vec![ids[1], ids[2]]);
+    }
+
+    #[test]
+    fn selection_groups_are_scoped_to_master_and_requested_page() {
+        let (mut document, page_id, _, ids) = fixture(false);
+        let other_page_id = PageId::new();
+        let other_group_id = ElementId::new();
+        let other_leaf_id = ElementId::new();
+        document.pages.push(Page {
+            id: other_page_id,
+            name: "Other page".to_owned(),
+            size_mm: Size {
+                width: 210.0,
+                height: 297.0,
+            },
+            layers: vec![Layer {
+                id: LayerId::new(),
+                name: "Other layer".to_owned(),
+                visible: true,
+                locked: false,
+                draw_color: None,
+                scene: Scene {
+                    roots: vec![other_group_id],
+                    elements: vec![
+                        element(
+                            other_group_id,
+                            80.0,
+                            ElementKind::Group {
+                                children: vec![other_leaf_id],
+                            },
+                        ),
+                        element(other_leaf_id, 80.0, ElementKind::Ellipse),
+                    ],
+                },
+            }],
+        });
+
+        let active_groups = selection_groups(&document, page_id);
+        assert_eq!(active_groups.len(), 1);
+        assert_eq!(active_groups[0].group_id, ids[0]);
+        assert!(
+            active_groups
+                .iter()
+                .all(|group| group.group_id != other_group_id)
+        );
+
+        let other_groups = selection_groups(&document, other_page_id);
+        assert_eq!(other_groups.len(), 1);
+        assert_eq!(other_groups[0].group_id, other_group_id);
     }
 
     #[test]
