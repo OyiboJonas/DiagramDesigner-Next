@@ -28,9 +28,9 @@ jobs:
           cargo fmt --manifest-path crates/app-core/Cargo.toml
           cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
       - name: Test application core
-        run: cargo test --locked --manifest-path crates/app-core/Cargo.toml
+        run: cargo test --manifest-path crates/app-core/Cargo.toml
       - name: Clippy application core
-        run: cargo clippy --locked --manifest-path crates/app-core/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --manifest-path crates/app-core/Cargo.toml --all-targets -- -D warnings
       - name: Check Tauri desktop
         run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
       - name: Verify diff
