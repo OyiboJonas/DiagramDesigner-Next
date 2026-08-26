@@ -7,9 +7,8 @@ pub const PASTE_OFFSET_MM: f64 = 5.0;
 
 #[derive(Debug, Clone)]
 struct ClipboardGroupPayload {
-    id: ElementId,
-    name: String,
-    children: Vec<ElementId>,
+    element: Element,
+    z_index: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -22,9 +21,8 @@ pub struct ClipboardPayload {
 
 #[derive(Debug)]
 pub struct ClipboardGroupInstantiation {
-    pub group_id: ElementId,
-    pub child_ids: Vec<ElementId>,
-    pub name: String,
+    pub element: Element,
+    pub z_index: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -41,7 +39,6 @@ pub enum ClipboardError {
     MissingElement(ElementId),
     GroupRequiresTopLevel(ElementId),
     GroupCycle(ElementId),
-    GroupRequiresAtLeastTwoChildren(ElementId),
     OverlappingSelection(ElementId),
 }
 
@@ -62,10 +59,6 @@ impl fmt::Display for ClipboardError {
             Self::GroupCycle(element_id) => write!(
                 formatter,
                 "Structural group hierarchy contains a cycle at {element_id:?}."
-            ),
-            Self::GroupRequiresAtLeastTwoChildren(element_id) => write!(
-                formatter,
-                "Structural group {element_id:?} cannot be reconstructed because it has fewer than two children."
             ),
             Self::OverlappingSelection(element_id) => write!(
                 formatter,
@@ -102,7 +95,10 @@ impl ClipboardPayload {
             }
         }
         for group in &self.groups {
-            element_ids.insert(group.id, ElementId::new());
+            element_ids.insert(group.element.id, ElementId::new());
+            for port in &group.element.ports {
+                port_ids.insert(port.id, PortId::new());
+            }
         }
 
         let mut instantiated = Vec::with_capacity(self.elements.len());
@@ -146,14 +142,26 @@ impl ClipboardPayload {
         let groups = self
             .groups
             .iter()
-            .map(|group| ClipboardGroupInstantiation {
-                group_id: element_ids[&group.id],
-                child_ids: group
-                    .children
-                    .iter()
-                    .map(|child_id| element_ids[child_id])
-                    .collect(),
-                name: group.name.clone(),
+            .map(|group| {
+                let source = &group.element;
+                let mut element = source.clone();
+                element.id = element_ids[&source.id];
+                element.import = None;
+                element.bounds_mm.x += delta.x;
+                element.bounds_mm.y += delta.y;
+                for port in &mut element.ports {
+                    port.id = port_ids[&port.id];
+                }
+                let ElementKind::Group { children } = &mut element.kind else {
+                    unreachable!("clipboard group storage contains only structural groups")
+                };
+                for child_id in children {
+                    *child_id = element_ids[child_id];
+                }
+                ClipboardGroupInstantiation {
+                    element,
+                    z_index: group.z_index,
+                }
             })
             .collect();
         let selected = self
@@ -236,6 +244,7 @@ pub fn capture_selection(
     let mut elements = Vec::new();
     let mut groups = Vec::new();
     let mut source_ids = Vec::new();
+    let mut initial_order = Vec::new();
     for element_id in &ordered_ids {
         collect_subtree(
             *element_id,
@@ -245,6 +254,7 @@ pub fn capture_selection(
             &mut elements,
             &mut groups,
             &mut source_ids,
+            &mut initial_order,
         )?;
     }
 
@@ -264,6 +274,7 @@ fn collect_subtree(
     elements: &mut Vec<Element>,
     groups: &mut Vec<ClipboardGroupPayload>,
     source_ids: &mut Vec<ElementId>,
+    initial_order: &mut Vec<ElementId>,
 ) -> Result<(), ClipboardError> {
     if captured.contains(&element_id) {
         return Err(ClipboardError::OverlappingSelection(element_id));
@@ -279,21 +290,34 @@ fn collect_subtree(
     source_ids.push(element_id);
     match &element.kind {
         ElementKind::Group { children } => {
-            if children.len() < 2 {
-                return Err(ClipboardError::GroupRequiresAtLeastTwoChildren(element_id));
-            }
-            for child_id in children {
-                collect_subtree(
-                    *child_id, by_id, captured, visiting, elements, groups, source_ids,
-                )?;
-            }
+            let z_index = if children.is_empty() {
+                let index = initial_order.len();
+                initial_order.push(element_id);
+                Some(index)
+            } else {
+                for child_id in children {
+                    collect_subtree(
+                        *child_id,
+                        by_id,
+                        captured,
+                        visiting,
+                        elements,
+                        groups,
+                        source_ids,
+                        initial_order,
+                    )?;
+                }
+                None
+            };
             groups.push(ClipboardGroupPayload {
-                id: element.id,
-                name: element.name.clone(),
-                children: children.clone(),
+                element: element.clone(),
+                z_index,
             });
         }
-        _ => elements.push(element.clone()),
+        _ => {
+            elements.push(element.clone());
+            initial_order.push(element_id);
+        }
     }
 
     visiting.remove(&element_id);
@@ -552,8 +576,8 @@ mod tests {
         assert_eq!(payload.len(), 1);
         assert_eq!(payload.elements.len(), 3);
         assert_eq!(payload.groups.len(), 2);
-        assert_eq!(payload.groups[0].id, inner_group);
-        assert_eq!(payload.groups[1].id, outer_group);
+        assert_eq!(payload.groups[0].element.id, inner_group);
+        assert_eq!(payload.groups[1].element.id, outer_group);
         assert_eq!(
             payload.source_element_ids(),
             &[outer_group, inner_group, first_id, connector_id, second_id]
@@ -566,18 +590,20 @@ mod tests {
         let copied_second = instantiated.source_element_ids[&second_id];
         let copied_outer = instantiated.source_element_ids[&outer_group];
         assert_eq!(instantiated.element_ids, vec![copied_outer]);
-        assert_eq!(instantiated.groups[0].group_id, copied_inner);
-        assert_eq!(
-            instantiated.groups[0].child_ids,
-            vec![copied_first, copied_connector_id]
-        );
-        assert_eq!(instantiated.groups[0].name, "Inner");
-        assert_eq!(instantiated.groups[1].group_id, copied_outer);
-        assert_eq!(
-            instantiated.groups[1].child_ids,
-            vec![copied_inner, copied_second]
-        );
-        assert_eq!(instantiated.groups[1].name, "Outer");
+        assert_eq!(instantiated.groups[0].element.id, copied_inner);
+        let ElementKind::Group { children } = &instantiated.groups[0].element.kind else {
+            panic!("inner group")
+        };
+        assert_eq!(children, &vec![copied_first, copied_connector_id]);
+        assert_eq!(instantiated.groups[0].element.name, "Inner");
+        assert_eq!(instantiated.groups[0].z_index, None);
+        assert_eq!(instantiated.groups[1].element.id, copied_outer);
+        let ElementKind::Group { children } = &instantiated.groups[1].element.kind else {
+            panic!("outer group")
+        };
+        assert_eq!(children, &vec![copied_inner, copied_second]);
+        assert_eq!(instantiated.groups[1].element.name, "Outer");
+        assert_eq!(instantiated.groups[1].z_index, None);
 
         let copied_connector = instantiated
             .elements
@@ -600,6 +626,46 @@ mod tests {
             })
         );
         assert_eq!(connector.end.connection, None);
+    }
+
+    #[test]
+    fn empty_and_singleton_groups_are_captured_without_flattening() {
+        let leaf = ElementId::new();
+        let empty = ElementId::new();
+        let singleton = ElementId::new();
+        let outer = ElementId::new();
+        let document = document_with_elements(
+            vec![outer],
+            vec![
+                group(empty, "Empty", Vec::new()),
+                shape(leaf, PortId::new(), 50.0),
+                group(singleton, "Singleton", vec![leaf]),
+                group(outer, "Outer", vec![empty, singleton]),
+            ],
+        );
+        let payload = capture_selection(&document, &[outer]).unwrap();
+        assert_eq!(payload.elements.len(), 1);
+        assert_eq!(payload.groups.len(), 3);
+        assert_eq!(payload.groups[0].element.id, empty);
+        assert_eq!(payload.groups[0].z_index, Some(0));
+        assert_eq!(payload.groups[1].element.id, singleton);
+        assert_eq!(payload.groups[2].element.id, outer);
+        let instantiated = payload.instantiate(1);
+        let copied_empty = instantiated.source_element_ids[&empty];
+        let copied_leaf = instantiated.source_element_ids[&leaf];
+        let copied_singleton = instantiated.source_element_ids[&singleton];
+        let copied_outer = instantiated.source_element_ids[&outer];
+        assert_eq!(instantiated.element_ids, vec![copied_outer]);
+        assert_eq!(instantiated.groups[0].element.id, copied_empty);
+        assert_eq!(instantiated.groups[0].z_index, Some(0));
+        let ElementKind::Group { children } = &instantiated.groups[1].element.kind else {
+            panic!("singleton")
+        };
+        assert_eq!(children, &vec![copied_leaf]);
+        let ElementKind::Group { children } = &instantiated.groups[2].element.kind else {
+            panic!("outer")
+        };
+        assert_eq!(children, &vec![copied_empty, copied_singleton]);
     }
 
     #[test]

@@ -11,8 +11,8 @@ use editor_core::{
 };
 use editor_runtime::{EditorRuntime, RecoveryCheckpointKey, RecoveryPlan};
 use next_domain::{
-    Color, Connection, Element, ElementId, FillStyle, Layer, LayerId, NextArtifact, Page, PageId,
-    Point, PortId, Rect, Size, StrokeStyle, TextBlock,
+    Color, Connection, Element, ElementId, ElementKind, FillStyle, Layer, LayerId, NextArtifact,
+    Page, PageId, Point, PortId, Rect, Size, StrokeStyle, TextBlock,
 };
 use thiserror::Error;
 
@@ -87,11 +87,10 @@ pub struct ElementAppearanceUpdate {
     pub text_color: Option<Color>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StructuralGroupCreation {
-    pub group_id: ElementId,
-    pub element_ids: Vec<ElementId>,
-    pub name: String,
+    pub element: Element,
+    pub z_index: Option<usize>,
 }
 
 impl From<CoreConnectorEndpointSnapshot> for ConnectorEndpoints {
@@ -363,11 +362,15 @@ impl ApplicationSession {
                         z_index: None,
                     }),
             );
-        for group in groups {
-            transaction.push(EditCommand::GroupElements {
-                group_id: group.group_id,
-                element_ids: group.element_ids,
-                name: group.name,
+        let (mut empty_groups, non_empty_groups): (Vec<_>, Vec<_>) = groups
+            .into_iter()
+            .partition(|group| matches!(&group.element.kind, ElementKind::Group { children } if children.is_empty()));
+        empty_groups.sort_by_key(|group| group.z_index.unwrap_or(usize::MAX));
+        for group in empty_groups.into_iter().chain(non_empty_groups) {
+            transaction.push(EditCommand::CreateStructuralGroup {
+                target,
+                group: group.element,
+                z_index: group.z_index,
             });
         }
         for update in appearance_updates {

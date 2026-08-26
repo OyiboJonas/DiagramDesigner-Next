@@ -5,11 +5,10 @@ use next_domain::{
     AnchorSet, ConnectorLabelStyle, Document, DocumentDefaults, DocumentId, Element, ElementId,
     ElementKind, Layer, LayerId, NextArtifact, Page, PageId, Rect, Scene, Size,
 };
-
-fn rectangle(id: ElementId, name: &str, x: f64) -> Element {
+fn rectangle(id: ElementId, x: f64) -> Element {
     Element {
         id,
-        name: name.to_owned(),
+        name: "Leaf".to_owned(),
         bounds_mm: Rect {
             x,
             y: 20.0,
@@ -27,13 +26,31 @@ fn rectangle(id: ElementId, name: &str, x: f64) -> Element {
         import: None,
     }
 }
-
+fn group(id: ElementId, name: &str, children: Vec<ElementId>, x: f64) -> Element {
+    Element {
+        id,
+        name: name.to_owned(),
+        bounds_mm: Rect {
+            x,
+            y: 12.0,
+            width: 19.0,
+            height: 13.0,
+        },
+        rotation_deg: 0.0,
+        anchors: AnchorSet::default(),
+        ports: Vec::new(),
+        style_id: None,
+        text: None,
+        kind: ElementKind::Group { children },
+        import: None,
+    }
+}
 fn fixture() -> (NextArtifact, LayerTarget) {
     let page_id = PageId::new();
     let layer_id = LayerId::new();
-    let document = Document {
+    let d = Document {
         id: DocumentId::new(),
-        name: "Clipboard group transaction".to_owned(),
+        name: "Clipboard groups".to_owned(),
         defaults: DocumentDefaults {
             font_family: "Arial".to_owned(),
             font_size_pt: 10.0,
@@ -56,10 +73,7 @@ fn fixture() -> (NextArtifact, LayerTarget) {
                 visible: true,
                 locked: false,
                 draw_color: None,
-                scene: Scene {
-                    roots: Vec::new(),
-                    elements: Vec::new(),
-                },
+                scene: Scene::default(),
             }],
         }],
         styles: Vec::new(),
@@ -67,94 +81,121 @@ fn fixture() -> (NextArtifact, LayerTarget) {
         import: None,
     };
     (
-        NextArtifact::document(document),
+        NextArtifact::document(d),
         LayerTarget::Page { page_id, layer_id },
     )
 }
-
-fn roots(app: &ApplicationSession) -> Vec<ElementId> {
-    app.session().document().pages[0].layers[0]
+fn roots(a: &ApplicationSession) -> Vec<ElementId> {
+    a.session().document().pages[0].layers[0]
         .scene
         .roots
         .clone()
 }
-
-fn group_children(app: &ApplicationSession, group_id: ElementId) -> Vec<ElementId> {
-    let element = app.session().document().pages[0].layers[0]
+fn children(a: &ApplicationSession, id: ElementId) -> Vec<ElementId> {
+    let e = a.session().document().pages[0].layers[0]
         .scene
         .elements
         .iter()
-        .find(|element| element.id == group_id)
+        .find(|e| e.id == id)
         .unwrap();
-    let ElementKind::Group { children } = &element.kind else {
-        panic!("expected structural group")
+    let ElementKind::Group { children } = &e.kind else {
+        panic!("group")
     };
     children.clone()
 }
-
 #[test]
 fn clipboard_hierarchy_is_one_transaction_and_round_trips_through_ddnx() {
     let (artifact, target) = fixture();
-    let mut app = ApplicationSession::from_artifact(artifact).unwrap();
-    let initial_history = app.session().current_history_state();
-    let first = ElementId::new();
-    let second = ElementId::new();
-    let third = ElementId::new();
-    let ordinary = ElementId::new();
+    let mut a = ApplicationSession::from_artifact(artifact).unwrap();
+    let initial = a.session().current_history_state();
+    let f = ElementId::new();
+    let s = ElementId::new();
+    let t = ElementId::new();
+    let o = ElementId::new();
     let inner = ElementId::new();
     let outer = ElementId::new();
-
     assert!(
-        app.create_elements_with_groups(
+        a.create_elements_with_groups(
             target,
             vec![
-                rectangle(first, "First", 15.0),
-                rectangle(second, "Second", 40.0),
-                rectangle(third, "Third", 65.0),
-                rectangle(ordinary, "Ordinary", 100.0),
+                rectangle(f, 15.0),
+                rectangle(s, 40.0),
+                rectangle(t, 65.0),
+                rectangle(o, 100.0)
             ],
             vec![
                 StructuralGroupCreation {
-                    group_id: inner,
-                    element_ids: vec![first, second],
-                    name: "Inner".to_owned(),
+                    element: group(inner, "Inner", vec![f, s], 15.0),
+                    z_index: None
                 },
                 StructuralGroupCreation {
-                    group_id: outer,
-                    element_ids: vec![inner, third],
-                    name: "Outer".to_owned(),
-                },
+                    element: group(outer, "Outer", vec![inner, t], 15.0),
+                    z_index: None
+                }
             ],
-            Vec::new(),
+            Vec::new()
         )
         .unwrap()
     );
-    assert_eq!(roots(&app), vec![outer, ordinary]);
-    assert_eq!(group_children(&app, inner), vec![first, second]);
-    assert_eq!(group_children(&app, outer), vec![inner, third]);
-    let created_history = app.session().current_history_state();
-    assert_ne!(created_history, initial_history);
-
-    let prepared = app.prepare_document_save(PackageLimits::default()).unwrap();
-    let reopened =
-        ApplicationSession::from_ddnx_bytes(prepared.bytes(), PackageLimits::default()).unwrap();
-    assert_eq!(roots(&reopened), vec![outer, ordinary]);
-    assert_eq!(group_children(&reopened, inner), vec![first, second]);
-    assert_eq!(group_children(&reopened, outer), vec![inner, third]);
-
-    assert!(app.undo().unwrap());
-    assert_eq!(app.session().current_history_state(), initial_history);
-    assert!(roots(&app).is_empty());
+    assert_eq!(roots(&a), vec![outer, o]);
+    assert_eq!(children(&a, inner), vec![f, s]);
+    assert_eq!(children(&a, outer), vec![inner, t]);
+    let created = a.session().current_history_state();
+    assert_ne!(created, initial);
+    let bytes = a.prepare_document_save(PackageLimits::default()).unwrap();
+    let r = ApplicationSession::from_ddnx_bytes(bytes.bytes(), PackageLimits::default()).unwrap();
+    assert_eq!(roots(&r), vec![outer, o]);
+    assert_eq!(children(&r, outer), vec![inner, t]);
+    assert!(a.undo().unwrap());
+    assert_eq!(a.session().current_history_state(), initial);
+    assert!(roots(&a).is_empty());
+    assert!(a.redo().unwrap());
+    assert_eq!(a.session().current_history_state(), created)
+}
+#[test]
+fn clipboard_preserves_empty_and_singleton_group_snapshots() {
+    let (artifact, target) = fixture();
+    let mut a = ApplicationSession::from_artifact(artifact).unwrap();
+    let leaf = ElementId::new();
+    let empty = ElementId::new();
+    let single = ElementId::new();
+    let outer = ElementId::new();
+    let ordinary = ElementId::new();
+    let e = group(empty, "Empty", Vec::new(), 4.0);
+    let s = group(single, "Singleton", vec![leaf], 20.0);
+    let o = group(outer, "Outer", vec![empty, single], 4.0);
     assert!(
-        app.session().document().pages[0].layers[0]
-            .scene
-            .elements
-            .is_empty()
+        a.create_elements_with_groups(
+            target,
+            vec![rectangle(leaf, 20.0), rectangle(ordinary, 100.0)],
+            vec![
+                StructuralGroupCreation {
+                    element: e.clone(),
+                    z_index: Some(0)
+                },
+                StructuralGroupCreation {
+                    element: s.clone(),
+                    z_index: None
+                },
+                StructuralGroupCreation {
+                    element: o.clone(),
+                    z_index: None
+                }
+            ],
+            Vec::new()
+        )
+        .unwrap()
     );
-
-    assert!(app.redo().unwrap());
-    assert_eq!(app.session().current_history_state(), created_history);
-    assert_eq!(roots(&app), vec![outer, ordinary]);
-    assert_eq!(group_children(&app, inner), vec![first, second]);
-    assert_eq!(group_children(&app, outer), vec![inner, third]);
+    assert_eq!(roots(&a), vec![outer, ordinary]);
+    assert_eq!(children(&a, empty), Vec::<ElementId>::new());
+    assert_eq!(children(&a, single), vec![leaf]);
+    assert_eq!(children(&a, outer), vec![empty, single]);
+    let scene = &a.session().document().pages[0].layers[0].scene;
+    assert_eq!(scene.elements.iter().find(|x| x.id == empty).unwrap(), &e);
+    assert_eq!(scene.elements.iter().find(|x| x.id == single).unwrap(), &s);
+    let bytes = a.prepare_document_save(PackageLimits::default()).unwrap();
+    let r = ApplicationSession::from_ddnx_bytes(bytes.bytes(), PackageLimits::default()).unwrap();
+    assert_eq!(roots(&r), vec![outer, ordinary]);
+    assert_eq!(children(&r, empty), Vec::<ElementId>::new());
+    assert_eq!(children(&r, single), vec![leaf])
 }

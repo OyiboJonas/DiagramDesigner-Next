@@ -1448,9 +1448,8 @@ fn paste_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultDt
         .groups
         .into_iter()
         .map(|group| StructuralGroupCreation {
-            group_id: group.group_id,
-            element_ids: group.child_ids,
-            name: group.name,
+            element: group.element,
+            z_index: group.z_index,
         })
         .collect();
     document
@@ -1496,9 +1495,8 @@ fn duplicate_selection(
         .groups
         .into_iter()
         .map(|group| StructuralGroupCreation {
-            group_id: group.group_id,
-            element_ids: group.child_ids,
-            name: group.name,
+            element: group.element,
+            z_index: group.z_index,
         })
         .collect();
     document
@@ -1574,16 +1572,24 @@ fn prepare_clipboard_appearance_updates(
         let Some(style) = snapshots.get(source_id) else {
             continue;
         };
-        let copied = instantiated
+        let copied = if let Some(element) = instantiated
             .elements
             .iter_mut()
             .find(|element| element.id == *copied_id)
-            .ok_or_else(|| {
-                CommandError::new(
-                    "clipboard_copy_missing",
-                    "The instantiated clipboard element could not be resolved.",
-                )
-            })?;
+        {
+            element
+        } else if let Some(group) = instantiated
+            .groups
+            .iter_mut()
+            .find(|group| group.element.id == *copied_id)
+        {
+            &mut group.element
+        } else {
+            return Err(CommandError::new(
+                "clipboard_copy_missing",
+                "The instantiated clipboard element could not be resolved.",
+            ));
+        };
 
         copied.style_id = None;
         updates.push(ElementAppearanceUpdate {
