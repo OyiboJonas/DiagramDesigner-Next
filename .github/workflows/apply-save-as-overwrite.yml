@@ -1,0 +1,43 @@
+name: Apply Save As overwrite workflow
+
+on:
+  push:
+    branches: [desktop-save-as-overwrite]
+    paths:
+      - '.github/workflows/apply-save-as-overwrite.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Apply Save As product changes
+        run: python .github/scripts/apply-save-as-overwrite.py
+      - name: Format desktop Rust
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Validate desktop command ACL parity
+        run: python scripts/check-desktop-command-acl.py
+      - name: Desktop JavaScript syntax
+        run: |
+          node --check apps/desktop/ui/app.js
+          node --check apps/desktop/ui/editor-interaction/app-shortcuts.mjs
+      - name: Save shortcut regression tests
+        run: node --test web/editor-interaction/app-shortcuts.test.mjs
+      - name: Diff check
+        run: git diff --check
+      - name: Commit product changes and remove temporary helpers
+        run: |
+          git rm .github/scripts/apply-save-as-overwrite.py .github/workflows/apply-save-as-overwrite.yml
+          git add apps/desktop/src-tauri/src/save_policy.rs apps/desktop/src-tauri/src/lib.rs apps/desktop/src-tauri/build.rs apps/desktop/src-tauri/permissions/editor.toml apps/desktop/src-tauri/capabilities/main-editor.json apps/desktop/ui/index.html apps/desktop/ui/app.js apps/desktop/ui/editor-interaction/app-shortcuts.mjs web/editor-interaction/app-shortcuts.test.mjs
+          git diff --cached --quiet && { echo 'No product changes staged'; exit 1; }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Desktop: add Save As and overwrite confirmation'
+          git push
