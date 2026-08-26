@@ -37,7 +37,8 @@ pub struct ClipboardInstantiation {
 pub enum ClipboardError {
     EmptySelection,
     MissingElement(ElementId),
-    GroupRequiresTopLevel(ElementId),
+    SelectionRequiresTopLevel(ElementId),
+    SelectionSpansScenes,
     GroupCycle(ElementId),
     OverlappingSelection(ElementId),
 }
@@ -52,9 +53,12 @@ impl fmt::Display for ClipboardError {
                     "Selected or grouped element {element_id:?} no longer exists."
                 )
             }
-            Self::GroupRequiresTopLevel(element_id) => write!(
+            Self::SelectionRequiresTopLevel(element_id) => write!(
                 formatter,
-                "Structural group {element_id:?} must be a top-level scene root before it can be copied."
+                "Selected element {element_id:?} must be a top-level scene root before it can be copied."
+            ),
+            Self::SelectionSpansScenes => formatter.write_str(
+                "Clipboard selection must stay within one scene/layer."
             ),
             Self::GroupCycle(element_id) => write!(
                 formatter,
@@ -189,55 +193,57 @@ pub fn capture_selection(
 
     let selected_set: BTreeSet<_> = selected.iter().copied().collect();
     let mut by_id = BTreeMap::new();
-    let mut scene_roots = BTreeSet::new();
+    let mut scene_by_id = BTreeMap::new();
+    let mut roots_by_scene = Vec::new();
+
     for layer in &document.master_layers {
-        scene_roots.extend(layer.scene.roots.iter().copied());
+        let scene_index = roots_by_scene.len();
+        roots_by_scene.push(layer.scene.roots.clone());
         for element in &layer.scene.elements {
             by_id.insert(element.id, element);
+            scene_by_id.insert(element.id, scene_index);
         }
     }
     for page in &document.pages {
         for layer in &page.layers {
-            scene_roots.extend(layer.scene.roots.iter().copied());
+            let scene_index = roots_by_scene.len();
+            roots_by_scene.push(layer.scene.roots.clone());
             for element in &layer.scene.elements {
                 by_id.insert(element.id, element);
+                scene_by_id.insert(element.id, scene_index);
             }
         }
     }
 
+    let mut selected_scene = None;
     for element_id in &selected_set {
-        let element = by_id
+        by_id
             .get(element_id)
             .copied()
             .ok_or(ClipboardError::MissingElement(*element_id))?;
-        if matches!(&element.kind, ElementKind::Group { .. }) && !scene_roots.contains(element_id) {
-            return Err(ClipboardError::GroupRequiresTopLevel(*element_id));
+        let scene_index = *scene_by_id
+            .get(element_id)
+            .ok_or(ClipboardError::MissingElement(*element_id))?;
+        if let Some(expected_scene) = selected_scene {
+            if expected_scene != scene_index {
+                return Err(ClipboardError::SelectionSpansScenes);
+            }
+        } else {
+            selected_scene = Some(scene_index);
+        }
+        if !roots_by_scene[scene_index].contains(element_id) {
+            return Err(ClipboardError::SelectionRequiresTopLevel(*element_id));
         }
     }
 
-    // Preserve visible scene z-order wherever possible instead of UUID order.
-    let mut ordered_ids = Vec::with_capacity(selected_set.len());
-    for layer in &document.master_layers {
-        for element_id in &layer.scene.roots {
-            if selected_set.contains(element_id) {
-                ordered_ids.push(*element_id);
-            }
-        }
-    }
-    for page in &document.pages {
-        for layer in &page.layers {
-            for element_id in &layer.scene.roots {
-                if selected_set.contains(element_id) {
-                    ordered_ids.push(*element_id);
-                }
-            }
-        }
-    }
-    for element_id in &selected_set {
-        if !ordered_ids.contains(element_id) {
-            ordered_ids.push(*element_id);
-        }
-    }
+    // Logical clipboard selections are direct roots from exactly one scene. Preserve
+    // that scene's canonical back-to-front root order instead of UUID order.
+    let scene_index = selected_scene.expect("non-empty selection has a scene");
+    let ordered_ids: Vec<_> = roots_by_scene[scene_index]
+        .iter()
+        .copied()
+        .filter(|element_id| selected_set.contains(element_id))
+        .collect();
 
     let mut captured = BTreeSet::new();
     let mut visiting = BTreeSet::new();
@@ -686,7 +692,59 @@ mod tests {
 
         assert!(matches!(
             capture_selection(&document, &[inner]),
-            Err(ClipboardError::GroupRequiresTopLevel(id)) if id == inner
+            Err(ClipboardError::SelectionRequiresTopLevel(id)) if id == inner
+        ));
+    }
+
+    #[test]
+    fn ordinary_group_child_selection_is_rejected_as_non_top_level() {
+        let child = ElementId::new();
+        let owner = ElementId::new();
+        let document = document_with_elements(
+            vec![owner],
+            vec![
+                shape(child, PortId::new(), 10.0),
+                group(owner, "Owner", vec![child]),
+            ],
+        );
+
+        assert!(matches!(
+            capture_selection(&document, &[child]),
+            Err(ClipboardError::SelectionRequiresTopLevel(id)) if id == child
+        ));
+    }
+
+    #[test]
+    fn selection_spanning_two_scenes_is_rejected_explicitly() {
+        let first = ElementId::new();
+        let second = ElementId::new();
+        let mut document = document_with_elements(
+            vec![first],
+            vec![shape(first, PortId::new(), 10.0)],
+        );
+        document.pages.push(Page {
+            id: PageId::new(),
+            name: "Second page".to_owned(),
+            size_mm: Size {
+                width: 210.0,
+                height: 297.0,
+            },
+            layers: vec![Layer {
+                id: LayerId::new(),
+                name: "Second layer".to_owned(),
+                visible: true,
+                locked: false,
+                draw_color: None,
+                scene: Scene {
+                    roots: vec![second],
+                    elements: vec![shape(second, PortId::new(), 80.0)],
+                },
+            }],
+        });
+
+        assert!(matches!(
+            capture_selection(&document, &[first, second]),
+            Err(ClipboardError::SelectionSpansScenes)
         ));
     }
 }
