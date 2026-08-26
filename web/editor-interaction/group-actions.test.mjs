@@ -11,3 +11,10 @@ test('group actions follow backend capability and busy state', () => {
   assert.equal(isUngroupActionEnabled({ canUngroup: false, busy: false }), false);
   assert.equal(isUngroupActionEnabled({ canUngroup: true, busy: true }), false);
 });
+
+test('group actions stay disabled without an explicit backend capability', () => {
+  assert.equal(isGroupActionEnabled(), false);
+  assert.equal(isUngroupActionEnabled(), false);
+  assert.equal(isGroupActionEnabled({ canGroup: 1 }), false);
+  assert.equal(isUngroupActionEnabled({ canUngroup: 'true' }), false);
+});
