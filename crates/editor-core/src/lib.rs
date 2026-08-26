@@ -62,6 +62,14 @@ pub enum ConnectorGeometryKind {
     Curve,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZOrderOperation {
+    BringToFront,
+    SendToBack,
+    BringForward,
+    SendBackward,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConnectorEndpointSnapshot {
     pub kind: ConnectorGeometryKind,
@@ -108,6 +116,10 @@ pub enum EditCommand {
     MoveElements {
         element_ids: Vec<ElementId>,
         delta_mm: Point,
+    },
+    ReorderElements {
+        element_ids: Vec<ElementId>,
+        operation: ZOrderOperation,
     },
     SetBounds {
         element_id: ElementId,
@@ -401,6 +413,12 @@ pub enum EditorError {
     InvalidTextLayout,
     #[error("command contains duplicate element {0:?}")]
     DuplicateCommandElement(ElementId),
+    #[error("z-order selection spans more than one layer")]
+    ZOrderDifferentLayers,
+    #[error("z-order editing currently requires top-level element {0:?}")]
+    ZOrderRequiresTopLevelElement(ElementId),
+    #[error("structural group {0:?} requires the dedicated grouping workflow for z-order changes")]
+    GroupZOrderUnsupported(ElementId),
     #[error("z-order index {index} is outside 0..={len}")]
     InvalidZOrderIndex { index: usize, len: usize },
     #[error("non-empty group creation requires the dedicated grouping command")]
@@ -492,6 +510,10 @@ enum UndoStep {
     MoveElements {
         element_ids: Vec<ElementId>,
         delta_mm: Point,
+    },
+    RestoreZOrder {
+        target: LayerTarget,
+        roots: Vec<ElementId>,
     },
     SetBounds {
         element_id: ElementId,
@@ -1043,6 +1065,10 @@ fn apply_command(
             element_ids,
             delta_mm,
         } => apply_move(document, element_ids, *delta_mm),
+        EditCommand::ReorderElements {
+            element_ids,
+            operation,
+        } => apply_reorder_elements(document, element_ids, *operation),
         EditCommand::SetBounds {
             element_id,
             bounds_mm,
@@ -1302,6 +1328,109 @@ fn apply_move(
                 x: -delta_mm.x,
                 y: -delta_mm.y,
             },
+        },
+        structural: false,
+    }))
+}
+
+fn apply_reorder_elements(
+    document: &mut Document,
+    element_ids: &[ElementId],
+    operation: ZOrderOperation,
+) -> Result<Option<AppliedCommand>, EditorError> {
+    if element_ids.is_empty() {
+        return Ok(None);
+    }
+
+    let mut selected = BTreeSet::new();
+    let mut target = None;
+    for element_id in element_ids {
+        if !selected.insert(*element_id) {
+            return Err(EditorError::DuplicateCommandElement(*element_id));
+        }
+        ensure_element_editable(document, *element_id)?;
+        let element_target = layer_target_for_element(document, *element_id)
+            .ok_or(EditorError::ElementNotFound(*element_id))?;
+        if target.is_some_and(|existing| existing != element_target) {
+            return Err(EditorError::ZOrderDifferentLayers);
+        }
+        target = Some(element_target);
+        let element =
+            find_element(document, *element_id).ok_or(EditorError::ElementNotFound(*element_id))?;
+        if matches!(&element.kind, ElementKind::Group { .. }) {
+            return Err(EditorError::GroupZOrderUnsupported(*element_id));
+        }
+    }
+
+    let target = target.expect("non-empty z-order selection has a target layer");
+    let layer =
+        find_layer(document, target).ok_or(EditorError::LayerNotFound(layer_id_of(target)))?;
+    for element_id in &selected {
+        if layer
+            .scene
+            .roots
+            .iter()
+            .filter(|root| **root == *element_id)
+            .count()
+            != 1
+        {
+            return Err(EditorError::ZOrderRequiresTopLevelElement(*element_id));
+        }
+    }
+
+    let previous = layer.scene.roots.clone();
+    let mut reordered = previous.clone();
+    match operation {
+        ZOrderOperation::BringToFront => {
+            reordered.retain(|element_id| !selected.contains(element_id));
+            reordered.extend(
+                previous
+                    .iter()
+                    .copied()
+                    .filter(|element_id| selected.contains(element_id)),
+            );
+        }
+        ZOrderOperation::SendToBack => {
+            reordered = previous
+                .iter()
+                .copied()
+                .filter(|element_id| selected.contains(element_id))
+                .chain(
+                    previous
+                        .iter()
+                        .copied()
+                        .filter(|element_id| !selected.contains(element_id)),
+                )
+                .collect();
+        }
+        ZOrderOperation::BringForward => {
+            for index in (0..reordered.len().saturating_sub(1)).rev() {
+                if selected.contains(&reordered[index]) && !selected.contains(&reordered[index + 1])
+                {
+                    reordered.swap(index, index + 1);
+                }
+            }
+        }
+        ZOrderOperation::SendBackward => {
+            for index in 1..reordered.len() {
+                if selected.contains(&reordered[index]) && !selected.contains(&reordered[index - 1])
+                {
+                    reordered.swap(index, index - 1);
+                }
+            }
+        }
+    }
+
+    if reordered == previous {
+        return Ok(None);
+    }
+
+    let layer = find_layer_mut(document, target).ok_or(EditorError::HistoryInvariantViolation)?;
+    layer.scene.roots = reordered;
+    Ok(Some(AppliedCommand {
+        undo: UndoStep::RestoreZOrder {
+            target,
+            roots: previous,
         },
         structural: false,
     }))
@@ -2003,6 +2132,11 @@ fn apply_undo_step(document: &mut Document, step: &UndoStep) -> Result<(), Edito
                 translate_element_geometry(element, *delta_mm);
             }
             synchronize_connected_endpoints(document)?;
+        }
+        UndoStep::RestoreZOrder { target, roots } => {
+            let layer =
+                find_layer_mut(document, *target).ok_or(EditorError::HistoryInvariantViolation)?;
+            layer.scene.roots = roots.clone();
         }
         UndoStep::SetBounds {
             element_id,
@@ -2995,6 +3129,20 @@ mod tests {
             .clone()
     }
 
+    fn z_order_fixture() -> (EditorSession, Vec<ElementId>, LayerTarget) {
+        let (base, first, second, _, _) = fixture(false);
+        let third = ElementId::new();
+        let fourth = ElementId::new();
+        let mut document = base.document().clone();
+        let layer = &mut document.pages[0].layers[0];
+        layer.scene.roots.extend([third, fourth]);
+        layer.scene.elements.push(element(third, 40.0, 50.0));
+        layer.scene.elements.push(element(fourth, 60.0, 70.0));
+        let session = EditorSession::from_artifact(NextArtifact::document(document)).unwrap();
+        let target = session.active_layer().unwrap();
+        (session, vec![first, second, third, fourth], target)
+    }
+
     fn with_styles(session: EditorSession, style_ids: &[StyleId]) -> EditorSession {
         let mut document = session.document().clone();
         document
@@ -3079,6 +3227,121 @@ mod tests {
             side,
         )
         .clone()
+    }
+
+    #[test]
+    fn z_order_preserves_multi_selection_order_and_round_trips_history() {
+        let (mut session, ids, target) = z_order_fixture();
+        let [first, second, third, fourth]: [ElementId; 4] = ids.try_into().unwrap();
+        let before = session.current_history_state();
+
+        assert!(
+            session
+                .execute(EditCommand::ReorderElements {
+                    element_ids: vec![second, third],
+                    operation: ZOrderOperation::BringToFront,
+                })
+                .unwrap()
+        );
+        let after = session.current_history_state();
+        assert_ne!(after, before);
+        assert_eq!(roots(&session, target), vec![first, fourth, second, third]);
+
+        assert!(session.undo().unwrap());
+        assert_eq!(session.current_history_state(), before);
+        assert_eq!(roots(&session, target), vec![first, second, third, fourth]);
+
+        assert!(session.redo().unwrap());
+        assert_eq!(session.current_history_state(), after);
+        assert_eq!(roots(&session, target), vec![first, fourth, second, third]);
+    }
+
+    #[test]
+    fn z_order_one_step_moves_are_stable_and_boundaries_are_noops() {
+        let (mut session, ids, target) = z_order_fixture();
+        let [first, second, third, fourth]: [ElementId; 4] = ids.try_into().unwrap();
+
+        assert!(
+            session
+                .execute(EditCommand::ReorderElements {
+                    element_ids: vec![first, third],
+                    operation: ZOrderOperation::BringForward,
+                })
+                .unwrap()
+        );
+        assert_eq!(roots(&session, target), vec![second, first, fourth, third]);
+        assert!(session.undo().unwrap());
+
+        assert!(
+            session
+                .execute(EditCommand::ReorderElements {
+                    element_ids: vec![second, fourth],
+                    operation: ZOrderOperation::SendBackward,
+                })
+                .unwrap()
+        );
+        assert_eq!(roots(&session, target), vec![second, first, fourth, third]);
+        assert!(session.undo().unwrap());
+
+        let history = session.current_history_state();
+        assert!(
+            !session
+                .execute(EditCommand::ReorderElements {
+                    element_ids: vec![fourth],
+                    operation: ZOrderOperation::BringToFront,
+                })
+                .unwrap()
+        );
+        assert!(
+            !session
+                .execute(EditCommand::ReorderElements {
+                    element_ids: vec![first],
+                    operation: ZOrderOperation::SendToBack,
+                })
+                .unwrap()
+        );
+        assert_eq!(session.current_history_state(), history);
+    }
+
+    #[test]
+    fn z_order_rejects_cross_layer_and_group_owned_mutation() {
+        let (mut session, first, second, master, _) = fixture(false);
+        let history = session.current_history_state();
+        assert!(matches!(
+            session.execute(EditCommand::ReorderElements {
+                element_ids: vec![first, master],
+                operation: ZOrderOperation::BringToFront,
+            }),
+            Err(EditorError::ZOrderDifferentLayers)
+        ));
+        assert_eq!(session.current_history_state(), history);
+
+        let group_id = ElementId::new();
+        assert!(
+            session
+                .execute(EditCommand::GroupElements {
+                    group_id,
+                    element_ids: vec![first, second],
+                    name: "Group".to_owned(),
+                })
+                .unwrap()
+        );
+        let grouped_history = session.current_history_state();
+        assert!(matches!(
+            session.execute(EditCommand::ReorderElements {
+                element_ids: vec![group_id],
+                operation: ZOrderOperation::SendToBack,
+            }),
+            Err(EditorError::GroupZOrderUnsupported(id)) if id == group_id
+        ));
+        assert!(matches!(
+            session.execute(EditCommand::ReorderElements {
+                element_ids: vec![first],
+                operation: ZOrderOperation::SendToBack,
+            }),
+            Err(EditorError::ZOrderRequiresTopLevelElement(id)) if id == first
+        ));
+        assert_eq!(session.current_history_state(), grouped_history);
     }
 
     #[test]
