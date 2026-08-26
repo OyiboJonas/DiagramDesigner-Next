@@ -19,6 +19,16 @@ test('z-order actions require a mutable active layer and a selection', () => {
     true,
   );
   assert.equal(
+    isZOrderActionEnabled({
+      selectionCount: 1,
+      layerVisible: true,
+      layerLocked: false,
+      busy: false,
+      containsGroup: true,
+    }),
+    true,
+  );
+  assert.equal(
     isZOrderActionEnabled({ selectionCount: 0, layerVisible: true, layerLocked: false, busy: false }),
     false,
   );

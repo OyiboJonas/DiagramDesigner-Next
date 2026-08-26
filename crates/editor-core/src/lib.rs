@@ -417,8 +417,6 @@ pub enum EditorError {
     ZOrderDifferentLayers,
     #[error("z-order editing currently requires top-level element {0:?}")]
     ZOrderRequiresTopLevelElement(ElementId),
-    #[error("structural group {0:?} requires the dedicated grouping workflow for z-order changes")]
-    GroupZOrderUnsupported(ElementId),
     #[error("z-order index {index} is outside 0..={len}")]
     InvalidZOrderIndex { index: usize, len: usize },
     #[error("non-empty group creation requires the dedicated grouping command")]
@@ -1355,11 +1353,6 @@ fn apply_reorder_elements(
             return Err(EditorError::ZOrderDifferentLayers);
         }
         target = Some(element_target);
-        let element =
-            find_element(document, *element_id).ok_or(EditorError::ElementNotFound(*element_id))?;
-        if matches!(&element.kind, ElementKind::Group { .. }) {
-            return Err(EditorError::GroupZOrderUnsupported(*element_id));
-        }
     }
 
     let target = target.expect("non-empty z-order selection has a target layer");
@@ -3304,7 +3297,7 @@ mod tests {
     }
 
     #[test]
-    fn z_order_rejects_cross_layer_and_group_owned_mutation() {
+    fn z_order_rejects_cross_layer_and_group_children_but_allows_top_level_group_noops() {
         let (mut session, first, second, master, _) = fixture(false);
         let history = session.current_history_state();
         assert!(matches!(
@@ -3327,13 +3320,15 @@ mod tests {
                 .unwrap()
         );
         let grouped_history = session.current_history_state();
-        assert!(matches!(
-            session.execute(EditCommand::ReorderElements {
-                element_ids: vec![group_id],
-                operation: ZOrderOperation::SendToBack,
-            }),
-            Err(EditorError::GroupZOrderUnsupported(id)) if id == group_id
-        ));
+        assert!(
+            !session
+                .execute(EditCommand::ReorderElements {
+                    element_ids: vec![group_id],
+                    operation: ZOrderOperation::SendToBack,
+                })
+                .unwrap()
+        );
+        assert_eq!(session.current_history_state(), grouped_history);
         assert!(matches!(
             session.execute(EditCommand::ReorderElements {
                 element_ids: vec![first],
@@ -3342,6 +3337,66 @@ mod tests {
             Err(EditorError::ZOrderRequiresTopLevelElement(id)) if id == first
         ));
         assert_eq!(session.current_history_state(), grouped_history);
+    }
+
+    #[test]
+    fn z_order_moves_top_level_groups_without_mutating_child_structure() {
+        let (mut session, ids, target) = z_order_fixture();
+        let [first, second, third, fourth]: [ElementId; 4] = ids.try_into().unwrap();
+        let group_id = ElementId::new();
+        session
+            .execute(EditCommand::GroupElements {
+                group_id,
+                element_ids: vec![first, second],
+                name: "Pair".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(roots(&session, target), vec![group_id, third, fourth]);
+        let children = |session: &EditorSession| {
+            let group = find_element(session.document(), group_id).unwrap();
+            let ElementKind::Group { children } = &group.kind else {
+                panic!("expected group")
+            };
+            children.clone()
+        };
+        assert_eq!(children(&session), vec![first, second]);
+        let grouped_history = session.current_history_state();
+
+        assert!(
+            session
+                .execute(EditCommand::ReorderElements {
+                    element_ids: vec![group_id],
+                    operation: ZOrderOperation::BringToFront,
+                })
+                .unwrap()
+        );
+        let front_history = session.current_history_state();
+        assert_eq!(roots(&session, target), vec![third, fourth, group_id]);
+        assert_eq!(children(&session), vec![first, second]);
+
+        assert!(session.undo().unwrap());
+        assert_eq!(session.current_history_state(), grouped_history);
+        assert_eq!(roots(&session, target), vec![group_id, third, fourth]);
+        assert_eq!(children(&session), vec![first, second]);
+        assert!(session.redo().unwrap());
+        assert_eq!(session.current_history_state(), front_history);
+        assert_eq!(roots(&session, target), vec![third, fourth, group_id]);
+        assert_eq!(children(&session), vec![first, second]);
+
+        // Caller order does not override the selected roots' existing relative order.
+        assert!(
+            session
+                .execute(EditCommand::ReorderElements {
+                    element_ids: vec![group_id, third],
+                    operation: ZOrderOperation::SendToBack,
+                })
+                .unwrap()
+        );
+        assert_eq!(roots(&session, target), vec![third, group_id, fourth]);
+        assert_eq!(children(&session), vec![first, second]);
+        assert!(session.undo().unwrap());
+        assert_eq!(roots(&session, target), vec![third, fourth, group_id]);
+        assert_eq!(children(&session), vec![first, second]);
     }
 
     #[test]

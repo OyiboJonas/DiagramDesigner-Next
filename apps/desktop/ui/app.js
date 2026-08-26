@@ -216,22 +216,17 @@ function activeLayerForZOrder() {
 function updateZOrderActionState() {
   const selectionCount = Number(currentSelectionProperties?.count ?? 0);
   const activeLayer = activeLayerForZOrder();
-  const containsGroup = currentSelectionProperties?.containsGroup === true;
-  const enabled =
-    !containsGroup &&
-    isZOrderActionEnabled({
-      selectionCount,
-      layerVisible: activeLayer?.visible === true,
-      layerLocked: activeLayer?.locked !== false,
-      busy: isBusy,
-    });
+  const enabled = isZOrderActionEnabled({
+    selectionCount,
+    layerVisible: activeLayer?.visible === true,
+    layerLocked: activeLayer?.locked !== false,
+    busy: isBusy,
+  });
   const reason = isBusy
     ? 'Finish the current action first'
     : selectionCount === 0
       ? 'Select one or more elements to arrange them'
-      : containsGroup
-        ? 'Structural groups keep their current z-order in this slice; ungroup before arranging'
-        : !activeLayer?.visible
+      : !activeLayer?.visible
         ? 'Show the active layer before arranging elements'
         : activeLayer?.locked
           ? 'Unlock the active layer before arranging elements'
