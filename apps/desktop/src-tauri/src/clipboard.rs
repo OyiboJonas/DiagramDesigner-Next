@@ -6,13 +6,31 @@ use next_domain::{Connection, Document, Element, ElementId, ElementKind, Endpoin
 pub const PASTE_OFFSET_MM: f64 = 5.0;
 
 #[derive(Debug, Clone)]
+struct ClipboardGroupPayload {
+    id: ElementId,
+    name: String,
+    children: Vec<ElementId>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ClipboardPayload {
     elements: Vec<Element>,
+    groups: Vec<ClipboardGroupPayload>,
+    root_ids: Vec<ElementId>,
+    source_ids: Vec<ElementId>,
+}
+
+#[derive(Debug)]
+pub struct ClipboardGroupInstantiation {
+    pub group_id: ElementId,
+    pub child_ids: Vec<ElementId>,
+    pub name: String,
 }
 
 #[derive(Debug)]
 pub struct ClipboardInstantiation {
     pub elements: Vec<Element>,
+    pub groups: Vec<ClipboardGroupInstantiation>,
     pub element_ids: Vec<ElementId>,
     pub source_element_ids: BTreeMap<ElementId, ElementId>,
 }
@@ -21,7 +39,10 @@ pub struct ClipboardInstantiation {
 pub enum ClipboardError {
     EmptySelection,
     MissingElement(ElementId),
-    GroupUnsupported(ElementId),
+    GroupRequiresTopLevel(ElementId),
+    GroupCycle(ElementId),
+    GroupRequiresAtLeastTwoChildren(ElementId),
+    OverlappingSelection(ElementId),
 }
 
 impl fmt::Display for ClipboardError {
@@ -31,12 +52,24 @@ impl fmt::Display for ClipboardError {
             Self::MissingElement(element_id) => {
                 write!(
                     formatter,
-                    "Selected element {element_id:?} no longer exists."
+                    "Selected or grouped element {element_id:?} no longer exists."
                 )
             }
-            Self::GroupUnsupported(element_id) => write!(
+            Self::GroupRequiresTopLevel(element_id) => write!(
                 formatter,
-                "Copying structural group {element_id:?} is not available in this first clipboard slice; ungroup it first."
+                "Structural group {element_id:?} must be a top-level scene root before it can be copied."
+            ),
+            Self::GroupCycle(element_id) => write!(
+                formatter,
+                "Structural group hierarchy contains a cycle at {element_id:?}."
+            ),
+            Self::GroupRequiresAtLeastTwoChildren(element_id) => write!(
+                formatter,
+                "Structural group {element_id:?} cannot be reconstructed because it has fewer than two children."
+            ),
+            Self::OverlappingSelection(element_id) => write!(
+                formatter,
+                "Clipboard selection overlaps an already captured group subtree at {element_id:?}."
             ),
         }
     }
@@ -46,7 +79,11 @@ impl std::error::Error for ClipboardError {}
 
 impl ClipboardPayload {
     pub fn len(&self) -> usize {
-        self.elements.len()
+        self.root_ids.len()
+    }
+
+    pub fn source_element_ids(&self) -> &[ElementId] {
+        &self.source_ids
     }
 
     pub fn instantiate(&self, cascade_step: u32) -> ClipboardInstantiation {
@@ -64,13 +101,14 @@ impl ClipboardPayload {
                 port_ids.insert(port.id, PortId::new());
             }
         }
+        for group in &self.groups {
+            element_ids.insert(group.id, ElementId::new());
+        }
 
         let mut instantiated = Vec::with_capacity(self.elements.len());
-        let mut selected = Vec::with_capacity(self.elements.len());
         for source in &self.elements {
             let mut element = source.clone();
             element.id = element_ids[&source.id];
-            selected.push(element.id);
             element.import = None;
             element.bounds_mm.x += delta.x;
             element.bounds_mm.y += delta.y;
@@ -98,15 +136,35 @@ impl ClipboardPayload {
                     }
                 }
                 ElementKind::Group { .. } => {
-                    unreachable!("groups are rejected while capturing the clipboard payload")
+                    unreachable!("clipboard leaf storage never contains structural groups")
                 }
                 _ => {}
             }
             instantiated.push(element);
         }
 
+        let groups = self
+            .groups
+            .iter()
+            .map(|group| ClipboardGroupInstantiation {
+                group_id: element_ids[&group.id],
+                child_ids: group
+                    .children
+                    .iter()
+                    .map(|child_id| element_ids[child_id])
+                    .collect(),
+                name: group.name.clone(),
+            })
+            .collect();
+        let selected = self
+            .root_ids
+            .iter()
+            .map(|root_id| element_ids[root_id])
+            .collect();
+
         ClipboardInstantiation {
             elements: instantiated,
+            groups,
             element_ids: selected,
             source_element_ids: element_ids,
         }
@@ -123,13 +181,16 @@ pub fn capture_selection(
 
     let selected_set: BTreeSet<_> = selected.iter().copied().collect();
     let mut by_id = BTreeMap::new();
+    let mut scene_roots = BTreeSet::new();
     for layer in &document.master_layers {
+        scene_roots.extend(layer.scene.roots.iter().copied());
         for element in &layer.scene.elements {
             by_id.insert(element.id, element);
         }
     }
     for page in &document.pages {
         for layer in &page.layers {
+            scene_roots.extend(layer.scene.roots.iter().copied());
             for element in &layer.scene.elements {
                 by_id.insert(element.id, element);
             }
@@ -141,8 +202,8 @@ pub fn capture_selection(
             .get(element_id)
             .copied()
             .ok_or(ClipboardError::MissingElement(*element_id))?;
-        if matches!(&element.kind, ElementKind::Group { .. }) {
-            return Err(ClipboardError::GroupUnsupported(*element_id));
+        if matches!(&element.kind, ElementKind::Group { .. }) && !scene_roots.contains(element_id) {
+            return Err(ClipboardError::GroupRequiresTopLevel(*element_id));
         }
     }
 
@@ -170,12 +231,74 @@ pub fn capture_selection(
         }
     }
 
+    let mut captured = BTreeSet::new();
+    let mut visiting = BTreeSet::new();
+    let mut elements = Vec::new();
+    let mut groups = Vec::new();
+    let mut source_ids = Vec::new();
+    for element_id in &ordered_ids {
+        collect_subtree(
+            *element_id,
+            &by_id,
+            &mut captured,
+            &mut visiting,
+            &mut elements,
+            &mut groups,
+            &mut source_ids,
+        )?;
+    }
+
     Ok(ClipboardPayload {
-        elements: ordered_ids
-            .into_iter()
-            .map(|element_id| by_id[&element_id].clone())
-            .collect(),
+        elements,
+        groups,
+        root_ids: ordered_ids,
+        source_ids,
     })
+}
+
+fn collect_subtree(
+    element_id: ElementId,
+    by_id: &BTreeMap<ElementId, &Element>,
+    captured: &mut BTreeSet<ElementId>,
+    visiting: &mut BTreeSet<ElementId>,
+    elements: &mut Vec<Element>,
+    groups: &mut Vec<ClipboardGroupPayload>,
+    source_ids: &mut Vec<ElementId>,
+) -> Result<(), ClipboardError> {
+    if captured.contains(&element_id) {
+        return Err(ClipboardError::OverlappingSelection(element_id));
+    }
+    if !visiting.insert(element_id) {
+        return Err(ClipboardError::GroupCycle(element_id));
+    }
+
+    let element = by_id
+        .get(&element_id)
+        .copied()
+        .ok_or(ClipboardError::MissingElement(element_id))?;
+    source_ids.push(element_id);
+    match &element.kind {
+        ElementKind::Group { children } => {
+            if children.len() < 2 {
+                return Err(ClipboardError::GroupRequiresAtLeastTwoChildren(element_id));
+            }
+            for child_id in children {
+                collect_subtree(
+                    *child_id, by_id, captured, visiting, elements, groups, source_ids,
+                )?;
+            }
+            groups.push(ClipboardGroupPayload {
+                id: element.id,
+                name: element.name.clone(),
+                children: children.clone(),
+            });
+        }
+        _ => elements.push(element.clone()),
+    }
+
+    visiting.remove(&element_id);
+    captured.insert(element_id);
+    Ok(())
 }
 
 fn remap_connector(
@@ -215,12 +338,12 @@ mod tests {
 
     use super::*;
 
-    fn shape(element_id: ElementId, port_id: PortId) -> Element {
+    fn shape(element_id: ElementId, port_id: PortId, x: f64) -> Element {
         Element {
             id: element_id,
             name: "Shape".to_owned(),
             bounds_mm: Rect {
-                x: 10.0,
+                x,
                 y: 20.0,
                 width: 30.0,
                 height: 15.0,
@@ -288,6 +411,61 @@ mod tests {
         }
     }
 
+    fn group(id: ElementId, name: &str, children: Vec<ElementId>) -> Element {
+        Element {
+            id,
+            name: name.to_owned(),
+            bounds_mm: Rect {
+                x: 10.0,
+                y: 20.0,
+                width: 90.0,
+                height: 30.0,
+            },
+            rotation_deg: 0.0,
+            anchors: AnchorSet::default(),
+            ports: Vec::new(),
+            style_id: None,
+            text: None,
+            kind: ElementKind::Group { children },
+            import: None,
+        }
+    }
+
+    fn document_with_elements(roots: Vec<ElementId>, elements: Vec<Element>) -> Document {
+        Document {
+            id: DocumentId::new(),
+            name: "Clipboard fixture".to_owned(),
+            defaults: DocumentDefaults {
+                font_family: "Arial".to_owned(),
+                font_size_pt: 10.0,
+                font_style_bits: 0,
+                object_shadows: false,
+                auto_line_break: true,
+                connector_label_style: ConnectorLabelStyle::Transparent,
+            },
+            master_layers: Vec::new(),
+            pages: vec![Page {
+                id: PageId::new(),
+                name: "Page".to_owned(),
+                size_mm: Size {
+                    width: 210.0,
+                    height: 297.0,
+                },
+                layers: vec![Layer {
+                    id: LayerId::new(),
+                    name: "Layer".to_owned(),
+                    visible: true,
+                    locked: false,
+                    draw_color: None,
+                    scene: Scene { roots, elements },
+                }],
+            }],
+            styles: Vec::new(),
+            assets: Vec::new(),
+            import: None,
+        }
+    }
+
     #[test]
     fn instantiate_remaps_internal_connections_and_detaches_external_targets() {
         let shape_id = ElementId::new();
@@ -297,7 +475,7 @@ mod tests {
         let external_port = PortId::new();
         let payload = ClipboardPayload {
             elements: vec![
-                shape(shape_id, shape_port),
+                shape(shape_id, shape_port, 10.0),
                 connector(
                     connector_id,
                     shape_id,
@@ -306,10 +484,14 @@ mod tests {
                     external_port,
                 ),
             ],
+            groups: Vec::new(),
+            root_ids: vec![shape_id, connector_id],
+            source_ids: vec![shape_id, connector_id],
         };
 
         let first = payload.instantiate(1);
         assert_eq!(first.elements.len(), 2);
+        assert_eq!(first.groups.len(), 0);
         let copied_shape = &first.elements[0];
         let copied_connector = &first.elements[1];
         assert_ne!(copied_shape.id, shape_id);
@@ -338,68 +520,107 @@ mod tests {
     }
 
     #[test]
-    fn capture_rejects_structural_groups() {
-        let group_id = ElementId::new();
-        let group = Element {
-            id: group_id,
-            name: "Group".to_owned(),
-            bounds_mm: Rect {
-                x: 0.0,
-                y: 0.0,
-                width: 10.0,
-                height: 10.0,
-            },
-            rotation_deg: 0.0,
-            anchors: AnchorSet::default(),
-            ports: Vec::new(),
-            style_id: None,
-            text: None,
-            kind: ElementKind::Group {
-                children: Vec::new(),
-            },
-            import: None,
+    fn nested_group_capture_builds_post_order_group_plan_and_fresh_root_selection() {
+        let first_id = ElementId::new();
+        let first_port = PortId::new();
+        let second_id = ElementId::new();
+        let second_port = PortId::new();
+        let connector_id = ElementId::new();
+        let inner_group = ElementId::new();
+        let outer_group = ElementId::new();
+        let external_id = ElementId::new();
+        let external_port = PortId::new();
+        let document = document_with_elements(
+            vec![outer_group, external_id],
+            vec![
+                shape(first_id, first_port, 10.0),
+                connector(
+                    connector_id,
+                    first_id,
+                    first_port,
+                    external_id,
+                    external_port,
+                ),
+                group(inner_group, "Inner", vec![first_id, connector_id]),
+                shape(second_id, second_port, 80.0),
+                group(outer_group, "Outer", vec![inner_group, second_id]),
+                shape(external_id, external_port, 150.0),
+            ],
+        );
+
+        let payload = capture_selection(&document, &[outer_group]).unwrap();
+        assert_eq!(payload.len(), 1);
+        assert_eq!(payload.elements.len(), 3);
+        assert_eq!(payload.groups.len(), 2);
+        assert_eq!(payload.groups[0].id, inner_group);
+        assert_eq!(payload.groups[1].id, outer_group);
+        assert_eq!(
+            payload.source_element_ids(),
+            &[outer_group, inner_group, first_id, connector_id, second_id]
+        );
+
+        let instantiated = payload.instantiate(1);
+        let copied_first = instantiated.source_element_ids[&first_id];
+        let copied_connector_id = instantiated.source_element_ids[&connector_id];
+        let copied_inner = instantiated.source_element_ids[&inner_group];
+        let copied_second = instantiated.source_element_ids[&second_id];
+        let copied_outer = instantiated.source_element_ids[&outer_group];
+        assert_eq!(instantiated.element_ids, vec![copied_outer]);
+        assert_eq!(instantiated.groups[0].group_id, copied_inner);
+        assert_eq!(
+            instantiated.groups[0].child_ids,
+            vec![copied_first, copied_connector_id]
+        );
+        assert_eq!(instantiated.groups[0].name, "Inner");
+        assert_eq!(instantiated.groups[1].group_id, copied_outer);
+        assert_eq!(
+            instantiated.groups[1].child_ids,
+            vec![copied_inner, copied_second]
+        );
+        assert_eq!(instantiated.groups[1].name, "Outer");
+
+        let copied_connector = instantiated
+            .elements
+            .iter()
+            .find(|element| element.id == copied_connector_id)
+            .unwrap();
+        let copied_shape = instantiated
+            .elements
+            .iter()
+            .find(|element| element.id == copied_first)
+            .unwrap();
+        let ElementKind::StraightConnector { connector } = &copied_connector.kind else {
+            panic!("expected copied connector")
         };
-        let page_id = PageId::new();
-        let layer_id = LayerId::new();
-        let document = Document {
-            id: DocumentId::new(),
-            name: "Clipboard fixture".to_owned(),
-            defaults: DocumentDefaults {
-                font_family: "Arial".to_owned(),
-                font_size_pt: 10.0,
-                font_style_bits: 0,
-                object_shadows: false,
-                auto_line_break: true,
-                connector_label_style: ConnectorLabelStyle::Transparent,
-            },
-            master_layers: Vec::new(),
-            pages: vec![Page {
-                id: page_id,
-                name: "Page".to_owned(),
-                size_mm: Size {
-                    width: 210.0,
-                    height: 297.0,
-                },
-                layers: vec![Layer {
-                    id: layer_id,
-                    name: "Layer".to_owned(),
-                    visible: true,
-                    locked: false,
-                    draw_color: None,
-                    scene: Scene {
-                        roots: vec![group_id],
-                        elements: vec![group],
-                    },
-                }],
-            }],
-            styles: Vec::new(),
-            assets: Vec::new(),
-            import: None,
-        };
+        assert_eq!(
+            connector.start.connection,
+            Some(Connection {
+                element_id: copied_first,
+                port_id: copied_shape.ports[0].id,
+            })
+        );
+        assert_eq!(connector.end.connection, None);
+    }
+
+    #[test]
+    fn nested_group_selection_is_rejected_until_its_top_level_owner_is_selected() {
+        let first = ElementId::new();
+        let second = ElementId::new();
+        let inner = ElementId::new();
+        let outer = ElementId::new();
+        let document = document_with_elements(
+            vec![outer],
+            vec![
+                shape(first, PortId::new(), 10.0),
+                shape(second, PortId::new(), 50.0),
+                group(inner, "Inner", vec![first, second]),
+                group(outer, "Outer", vec![inner, ElementId::new()]),
+            ],
+        );
 
         assert!(matches!(
-            capture_selection(&document, &[group_id]),
-            Err(ClipboardError::GroupUnsupported(id)) if id == group_id
+            capture_selection(&document, &[inner]),
+            Err(ClipboardError::GroupRequiresTopLevel(id)) if id == inner
         ));
     }
 }

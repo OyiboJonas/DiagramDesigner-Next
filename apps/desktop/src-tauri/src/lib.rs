@@ -14,7 +14,7 @@ use app_core::{
     ApplicationSession, ConnectorEndpointSide as AppConnectorEndpointSide,
     ConnectorEndpointState as AppConnectorEndpointState,
     ConnectorEndpoints as AppConnectorEndpoints, ConnectorGeometryKind as AppConnectorGeometryKind,
-    ElementAppearanceUpdate, ZOrderOperation as AppZOrderOperation,
+    ElementAppearanceUpdate, StructuralGroupCreation, ZOrderOperation as AppZOrderOperation,
 };
 use ddnx::PackageLimits;
 use editor_runtime::RecoveryPlan;
@@ -1403,8 +1403,10 @@ fn copy_selection(state: State<'_, DesktopState>) -> Result<ClipboardCopyDto, Co
     let payload = clipboard::capture_selection(document.session.session().document(), &selected)
         .map_err(|error| CommandError::new("clipboard_copy_failed", error.to_string()))?;
     let count = payload.len();
-    let appearance =
-        capture_clipboard_appearance(document.session.session().document(), &selected)?;
+    let appearance = capture_clipboard_appearance(
+        document.session.session().document(),
+        payload.source_element_ids(),
+    )?;
     let mut application_clipboard = state.clipboard.lock().map_err(|_| {
         CommandError::new(
             "clipboard_lock_failed",
@@ -1442,9 +1444,18 @@ fn paste_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultDt
     let selected = instantiated.element_ids.clone();
     let appearance_updates =
         prepare_clipboard_appearance_updates(&clipboard.appearance, &mut instantiated)?;
+    let groups = instantiated
+        .groups
+        .into_iter()
+        .map(|group| StructuralGroupCreation {
+            group_id: group.group_id,
+            element_ids: group.child_ids,
+            name: group.name,
+        })
+        .collect();
     document
         .session
-        .create_elements(target, instantiated.elements, appearance_updates)
+        .create_elements_with_groups(target, instantiated.elements, groups, appearance_updates)
         .map_err(|error| CommandError::new("clipboard_paste_failed", error.to_string()))?;
     document
         .session
@@ -1474,14 +1485,25 @@ fn duplicate_selection(
         .collect();
     let payload = clipboard::capture_selection(document.session.session().document(), &selected)
         .map_err(|error| CommandError::new("duplicate_failed", error.to_string()))?;
-    let appearance =
-        capture_clipboard_appearance(document.session.session().document(), &selected)?;
+    let appearance = capture_clipboard_appearance(
+        document.session.session().document(),
+        payload.source_element_ids(),
+    )?;
     let mut instantiated = payload.instantiate(1);
     let duplicated_ids = instantiated.element_ids.clone();
     let appearance_updates = prepare_clipboard_appearance_updates(&appearance, &mut instantiated)?;
+    let groups = instantiated
+        .groups
+        .into_iter()
+        .map(|group| StructuralGroupCreation {
+            group_id: group.group_id,
+            element_ids: group.child_ids,
+            name: group.name,
+        })
+        .collect();
     document
         .session
-        .create_elements(target, instantiated.elements, appearance_updates)
+        .create_elements_with_groups(target, instantiated.elements, groups, appearance_updates)
         .map_err(|error| CommandError::new("duplicate_failed", error.to_string()))?;
     document
         .session

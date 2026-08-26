@@ -87,6 +87,13 @@ pub struct ElementAppearanceUpdate {
     pub text_color: Option<Color>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuralGroupCreation {
+    pub group_id: ElementId,
+    pub element_ids: Vec<ElementId>,
+    pub name: String,
+}
+
 impl From<CoreConnectorEndpointSnapshot> for ConnectorEndpoints {
     fn from(value: CoreConnectorEndpointSnapshot) -> Self {
         let kind = match value.kind {
@@ -334,6 +341,18 @@ impl ApplicationSession {
         elements: Vec<Element>,
         appearance_updates: Vec<ElementAppearanceUpdate>,
     ) -> Result<bool, ApplicationError> {
+        self.create_elements_with_groups(target, elements, Vec::new(), appearance_updates)
+    }
+
+    /// Create clipboard leaves, rebuild structural groups from inner to outer and
+    /// materialize dedicated appearance snapshots as one semantic history step.
+    pub fn create_elements_with_groups(
+        &mut self,
+        target: LayerTarget,
+        elements: Vec<Element>,
+        groups: Vec<StructuralGroupCreation>,
+        appearance_updates: Vec<ElementAppearanceUpdate>,
+    ) -> Result<bool, ApplicationError> {
         let mut transaction =
             EditTransaction::new(
                 elements
@@ -344,6 +363,13 @@ impl ApplicationSession {
                         z_index: None,
                     }),
             );
+        for group in groups {
+            transaction.push(EditCommand::GroupElements {
+                group_id: group.group_id,
+                element_ids: group.element_ids,
+                name: group.name,
+            });
+        }
         for update in appearance_updates {
             transaction.push(EditCommand::SetElementAppearance {
                 element_id: update.element_id,
