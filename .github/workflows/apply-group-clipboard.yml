@@ -18,13 +18,20 @@ jobs:
         with:
           toolchain: 1.85.0
           components: rustfmt, clippy
-      - name: Apply product patch
-        run: python .github/scripts/apply-group-clipboard.py
-      - name: Format touched Rust
+      - name: Apply migration-safe product patch
+        run: |
+          python .github/scripts/group-clipboard-core-v2.py
+          python .github/scripts/group-clipboard-model-v2.py
+          python .github/scripts/group-clipboard-app-v2.py
+      - name: Format Rust
         run: |
           cargo fmt --all
           cargo fmt --manifest-path crates/app-core/Cargo.toml
           cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Workspace tests
+        run: cargo test --locked --workspace
+      - name: Workspace Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Application core tests
         run: cargo test --manifest-path crates/app-core/Cargo.toml
       - name: Application core Clippy
@@ -35,21 +42,18 @@ jobs:
         run: node --test web/editor-interaction/*.test.mjs
       - name: Diff check
         run: git diff --check
-      - name: Commit product implementation
+      - name: Commit migration-safe product implementation
         run: |
           git add \
+            crates/editor-core/src/lib.rs \
             apps/desktop/src-tauri/src/clipboard.rs \
             apps/desktop/src-tauri/src/lib.rs \
-            apps/desktop/ui/app.js \
-            apps/desktop/ui/editor-interaction/clipboard-actions.mjs \
             crates/app-core/src/lib.rs \
-            crates/app-core/tests/group_clipboard_transaction.rs \
-            web/editor-interaction/clipboard-actions.mjs \
-            web/editor-interaction/clipboard-actions.test.mjs
-          git diff --cached --quiet && { echo 'No product changes staged'; exit 1; }
+            crates/app-core/tests/group_clipboard_transaction.rs
+          git diff --cached --quiet && { echo 'No migration-safe product changes staged'; exit 1; }
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Editor: support structural groups in clipboard workflows'
+          git commit -m 'Editor: preserve imported group snapshots in clipboard'
           git push
 
   windows-tauri:
