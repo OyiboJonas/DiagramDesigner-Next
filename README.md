@@ -11,9 +11,9 @@ Phase 0 established the bounded legacy decoding/migration boundary, renderer-ind
 
 ## 0.1 Windows alpha
 
-The first alpha packages the current editor foundation into one functional Windows workflow: native DDNX open/save, migration-safe `.ddd`/`.ddt` import, crash recovery, pages/layers, basic shapes and text, straight/orthogonal connectors with ports, selection/move/snapping, direct resize/rotation, basic appearance, and Undo/Redo.
+The first alpha packages the current editor foundation into one functional Windows workflow: native DDNX open/save, migration-safe `.ddd`/`.ddt` import, crash recovery, pages/layers, basic shapes and text, straight/orthogonal connectors with ports, selection/move/snapping, direct resize/rotation, basic appearance, and Undo/Redo. Current post-baseline builds also include structured clipboard operations, grouping/z-order, Save As with overwrite confirmation, and editable connector markers/line styles.
 
-The alpha remains intentionally conservative around persistence: legacy sources are import-only, first-save overwrite is refused until a dedicated confirmation flow exists, and dirty window close writes a fresh atomic recovery checkpoint before the native window is allowed to close. The WebView still receives no broad filesystem or shell capability.
+The alpha remains intentionally conservative around persistence: legacy sources are import-only, first Save and Save As require explicit native confirmation before replacing a newly selected existing DDNX target, and dirty window close writes a fresh atomic recovery checkpoint before the native window is allowed to close. The WebView still receives no broad filesystem or shell capability.
 
 The unsigned portable Windows artifact and the exact alpha smoke path/known limitations are documented in [`docs/testing/alpha-0.1.md`](docs/testing/alpha-0.1.md).
 
