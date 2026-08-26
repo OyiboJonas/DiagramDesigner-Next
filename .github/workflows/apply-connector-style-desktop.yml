@@ -37,8 +37,6 @@ jobs:
         run: node --test web/editor-interaction/connector-style-actions.test.mjs
       - name: Full frontend interaction tests
         run: node --test web/editor-interaction/*.test.mjs
-      - name: Desktop Rust check
-        run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
       - name: Workspace tests
         run: cargo test --locked --workspace
       - name: Workspace Clippy
