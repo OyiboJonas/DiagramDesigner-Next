@@ -1,3 +1,4 @@
+mod clipboard;
 mod legacy_import;
 mod renderer_benchmark_evidence;
 
@@ -12,6 +13,7 @@ use app_core::{
     ApplicationSession, ConnectorEndpointSide as AppConnectorEndpointSide,
     ConnectorEndpointState as AppConnectorEndpointState,
     ConnectorEndpoints as AppConnectorEndpoints, ConnectorGeometryKind as AppConnectorGeometryKind,
+    ElementAppearanceUpdate,
 };
 use ddnx::PackageLimits;
 use editor_runtime::RecoveryPlan;
@@ -19,8 +21,8 @@ use next_domain::{
     AnchorSet, Color, Connection, Connector, ConnectorLabelStyle, Document, DocumentDefaults,
     DocumentId, Element, ElementId, ElementKind, Endpoint, FillStyle, Layer, LayerId, LineStyle,
     MarkerStyle, NextArtifact, NormalizedPoint, Page, PageId, Point, Port, PortId, Rect,
-    RichTextDocument, RichTextToken, Scene, Size, StrokeStyle, TextBlock, TextHorizontalAlignment,
-    TextLayout, TextStyle, TextVerticalAlignment,
+    RichTextDocument, RichTextToken, Scene, Size, StrokeStyle, StyleId, TextBlock,
+    TextHorizontalAlignment, TextLayout, TextStyle, TextVerticalAlignment,
 };
 use platform_fs::{AtomicSaveError, CommitMode, DurabilityLevel, atomic_save};
 use render_plan::{RenderPlanOptions, build_page_plan};
@@ -68,14 +70,29 @@ impl DesktopDocument {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ClipboardAppearanceSnapshot {
+    stroke: Option<StrokeStyle>,
+    fill: Option<FillStyle>,
+    text_color: Option<Color>,
+}
+
+struct DesktopClipboard {
+    payload: clipboard::ClipboardPayload,
+    appearance: std::collections::BTreeMap<ElementId, ClipboardAppearanceSnapshot>,
+    paste_count: u32,
+}
+
 struct DesktopState {
     document: Mutex<DesktopDocument>,
+    clipboard: Mutex<Option<DesktopClipboard>>,
 }
 
 impl DesktopState {
     fn new() -> Result<Self, CommandError> {
         Ok(Self {
             document: Mutex::new(DesktopDocument::blank()?),
+            clipboard: Mutex::new(None),
         })
     }
 }
@@ -183,6 +200,12 @@ struct RecoveryStatusDto {
 struct RecoverySyncDto {
     action: &'static str,
     state: DocumentStateDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClipboardCopyDto {
+    count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -1157,6 +1180,191 @@ fn delete_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultD
 }
 
 #[tauri::command]
+fn copy_selection(state: State<'_, DesktopState>) -> Result<ClipboardCopyDto, CommandError> {
+    let document = lock_document(&state)?;
+    let selected: Vec<_> = document
+        .session
+        .session()
+        .selection()
+        .iter()
+        .copied()
+        .collect();
+    let payload = clipboard::capture_selection(document.session.session().document(), &selected)
+        .map_err(|error| CommandError::new("clipboard_copy_failed", error.to_string()))?;
+    let count = payload.len();
+    let appearance =
+        capture_clipboard_appearance(document.session.session().document(), &selected)?;
+    let mut application_clipboard = state.clipboard.lock().map_err(|_| {
+        CommandError::new(
+            "clipboard_lock_failed",
+            "The application clipboard lock is poisoned.",
+        )
+    })?;
+    *application_clipboard = Some(DesktopClipboard {
+        payload,
+        appearance,
+        paste_count: 0,
+    });
+    Ok(ClipboardCopyDto { count })
+}
+
+#[tauri::command]
+fn paste_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let target = document.session.session().active_layer().ok_or_else(|| {
+        CommandError::new(
+            "clipboard_no_active_layer",
+            "Choose an active layer before pasting elements.",
+        )
+    })?;
+    let mut application_clipboard = state.clipboard.lock().map_err(|_| {
+        CommandError::new(
+            "clipboard_lock_failed",
+            "The application clipboard lock is poisoned.",
+        )
+    })?;
+    let clipboard = application_clipboard
+        .as_mut()
+        .ok_or_else(|| CommandError::new("clipboard_empty", "Copy a selection before pasting."))?;
+    let next_step = clipboard.paste_count.saturating_add(1).max(1);
+    let mut instantiated = clipboard.payload.instantiate(next_step);
+    let selected = instantiated.element_ids.clone();
+    let appearance_updates =
+        prepare_clipboard_appearance_updates(&clipboard.appearance, &mut instantiated)?;
+    document
+        .session
+        .create_elements(target, instantiated.elements, appearance_updates)
+        .map_err(|error| CommandError::new("clipboard_paste_failed", error.to_string()))?;
+    document
+        .session
+        .set_selection(selected)
+        .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
+    clipboard.paste_count = next_step;
+    Ok(element_edit_result_dto(&document))
+}
+
+#[tauri::command]
+fn duplicate_selection(
+    state: State<'_, DesktopState>,
+) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let target = document.session.session().active_layer().ok_or_else(|| {
+        CommandError::new(
+            "duplicate_no_active_layer",
+            "Choose an active layer before duplicating elements.",
+        )
+    })?;
+    let selected: Vec<_> = document
+        .session
+        .session()
+        .selection()
+        .iter()
+        .copied()
+        .collect();
+    let payload = clipboard::capture_selection(document.session.session().document(), &selected)
+        .map_err(|error| CommandError::new("duplicate_failed", error.to_string()))?;
+    let appearance =
+        capture_clipboard_appearance(document.session.session().document(), &selected)?;
+    let mut instantiated = payload.instantiate(1);
+    let duplicated_ids = instantiated.element_ids.clone();
+    let appearance_updates = prepare_clipboard_appearance_updates(&appearance, &mut instantiated)?;
+    document
+        .session
+        .create_elements(target, instantiated.elements, appearance_updates)
+        .map_err(|error| CommandError::new("duplicate_failed", error.to_string()))?;
+    document
+        .session
+        .set_selection(duplicated_ids)
+        .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
+    Ok(element_edit_result_dto(&document))
+}
+
+fn clear_application_clipboard(state: &State<'_, DesktopState>) -> Result<(), CommandError> {
+    let mut application_clipboard = state.clipboard.lock().map_err(|_| {
+        CommandError::new(
+            "clipboard_lock_failed",
+            "The application clipboard lock is poisoned.",
+        )
+    })?;
+    *application_clipboard = None;
+    Ok(())
+}
+
+fn capture_clipboard_appearance(
+    document: &Document,
+    selected: &[ElementId],
+) -> Result<std::collections::BTreeMap<ElementId, ClipboardAppearanceSnapshot>, CommandError> {
+    const APPEARANCE_STYLE_NAMESPACE: &str = "diagramdesigner-next:element-appearance";
+    let mut snapshots = std::collections::BTreeMap::new();
+
+    for source_id in selected {
+        let source = find_element(document, *source_id).ok_or_else(|| {
+            CommandError::new(
+                "clipboard_source_missing",
+                "A copied source element no longer exists in the current document.",
+            )
+        })?;
+        let dedicated_style_id = StyleId::v5(source_id.0, APPEARANCE_STYLE_NAMESPACE);
+        if source.style_id != Some(dedicated_style_id) {
+            continue;
+        }
+        let style = document
+            .styles
+            .iter()
+            .find(|style| style.id == dedicated_style_id)
+            .ok_or_else(|| {
+                CommandError::new(
+                    "clipboard_appearance_missing",
+                    "The copied element's dedicated appearance style is missing.",
+                )
+            })?;
+        snapshots.insert(
+            *source_id,
+            ClipboardAppearanceSnapshot {
+                stroke: style.stroke.clone(),
+                fill: style.fill.clone(),
+                text_color: style.text_color,
+            },
+        );
+    }
+
+    Ok(snapshots)
+}
+
+fn prepare_clipboard_appearance_updates(
+    snapshots: &std::collections::BTreeMap<ElementId, ClipboardAppearanceSnapshot>,
+    instantiated: &mut clipboard::ClipboardInstantiation,
+) -> Result<Vec<ElementAppearanceUpdate>, CommandError> {
+    let mut updates = Vec::new();
+
+    for (source_id, copied_id) in &instantiated.source_element_ids {
+        let Some(style) = snapshots.get(source_id) else {
+            continue;
+        };
+        let copied = instantiated
+            .elements
+            .iter_mut()
+            .find(|element| element.id == *copied_id)
+            .ok_or_else(|| {
+                CommandError::new(
+                    "clipboard_copy_missing",
+                    "The instantiated clipboard element could not be resolved.",
+                )
+            })?;
+
+        copied.style_id = None;
+        updates.push(ElementAppearanceUpdate {
+            element_id: *copied_id,
+            stroke: style.stroke.clone(),
+            fill: style.fill.clone(),
+            text_color: style.text_color,
+        });
+    }
+
+    Ok(updates)
+}
+
+#[tauri::command]
 fn update_element_properties(
     request: UpdateElementPropertiesRequest,
     state: State<'_, DesktopState>,
@@ -1318,6 +1526,7 @@ fn new_document(state: State<'_, DesktopState>) -> Result<DocumentActionDto, Com
     let mut document = lock_document(&state)?;
     reject_if_dirty(&document)?;
     *document = DesktopDocument::blank()?;
+    clear_application_clipboard(&state)?;
     Ok(DocumentActionDto {
         cancelled: false,
         state: document_state_dto(&document),
@@ -1388,6 +1597,7 @@ async fn open_document(
         imported_dirty,
         recovered_dirty: false,
     };
+    clear_application_clipboard(&state)?;
 
     Ok(DocumentActionDto {
         cancelled: false,
@@ -1518,6 +1728,7 @@ fn restore_recovery(
         imported_dirty: false,
         recovered_dirty: true,
     };
+    clear_application_clipboard(&state)?;
 
     Ok(DocumentActionDto {
         cancelled: false,
@@ -2299,6 +2510,9 @@ pub fn run() {
             candidate_page_presentation,
             set_selection,
             selection_properties,
+            copy_selection,
+            paste_selection,
+            duplicate_selection,
             create_basic_element,
             create_connector,
             set_connector_endpoint,

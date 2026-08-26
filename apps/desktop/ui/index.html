@@ -28,6 +28,10 @@
           <button id="undo" type="button">Undo</button>
           <button id="redo" type="button">Redo</button>
           <span class="toolbar-separator" aria-hidden="true"></span>
+          <button id="copy-selection" type="button" title="Copy the current selection (Ctrl/Cmd+C)">Copy</button>
+          <button id="paste-selection" type="button" title="Paste the application clipboard (Ctrl/Cmd+V)">Paste</button>
+          <button id="duplicate-selection" type="button" title="Duplicate the current selection (Ctrl/Cmd+D)">Duplicate</button>
+          <span class="toolbar-separator" aria-hidden="true"></span>
           <button id="toggle-grid" class="toggle-button" type="button" aria-pressed="true">Grid</button>
           <button id="toggle-snap" class="toggle-button" type="button" aria-pressed="true">Snap</button>
           <span class="toolbar-separator" aria-hidden="true"></span>
@@ -159,7 +163,7 @@
           <p class="boundary-note">
             File access is owned by the Rust desktop boundary. The WebView has no generic filesystem permission.
             Pointer movement, connector previews, snapping and keyboard focus remain local to the presentation surface; only semantic selection, completed moves and completed connector creates cross IPC.
-            Tab enters or leaves the canvas; arrow keys, Home and End navigate elements; Space or Enter selects. Escape cancels an active connector tool or clears selection.
+            Tab enters or leaves the canvas; arrow keys, Home and End navigate elements; Space or Enter selects. Ctrl/Cmd+C, Ctrl/Cmd+V and Ctrl/Cmd+D copy, paste and duplicate outside text editing. Escape cancels an active connector tool or clears selection.
           </p>
         </aside>
 

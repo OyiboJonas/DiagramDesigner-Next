@@ -11,6 +11,9 @@ const elements = {
   saveDocument: document.querySelector('#save-document'),
   undo: document.querySelector('#undo'),
   redo: document.querySelector('#redo'),
+  copySelection: document.querySelector('#copy-selection'),
+  pasteSelection: document.querySelector('#paste-selection'),
+  duplicateSelection: document.querySelector('#duplicate-selection'),
   toggleGrid: document.querySelector('#toggle-grid'),
   toggleSnap: document.querySelector('#toggle-snap'),
   addRectangle: document.querySelector('#add-rectangle'),
@@ -85,6 +88,9 @@ const actionButtons = [
   elements.saveDocument,
   elements.undo,
   elements.redo,
+  elements.copySelection,
+  elements.pasteSelection,
+  elements.duplicateSelection,
   elements.addRectangle,
   elements.addEllipse,
   elements.addText,
@@ -117,6 +123,7 @@ let currentNavigation = null;
 let appearanceBaseline = null;
 let connectorTool = null;
 let isBusy = false;
+let clipboardAvailable = false;
 let keyboardSurface = null;
 
 const svgSurface = createSvgSurface(elements.canvasPage, {
@@ -153,11 +160,19 @@ function setBusy(busy) {
     const selectionCount = Number(currentSelectionProperties?.count ?? 0);
     const primary = currentSelectionProperties?.primary ?? null;
     elements.deleteSelection.disabled = selectionCount === 0;
+    updateClipboardActionState();
     elements.applyProperties.disabled =
       !primary || (primary.geometryEditable === false && primary.textEditable !== true);
     elements.applyAppearance.disabled = !primary?.appearance;
     updateStructureDisabledState();
   }
+}
+
+function updateClipboardActionState() {
+  const selectionCount = Number(currentSelectionProperties?.count ?? 0);
+  elements.copySelection.disabled = isBusy || selectionCount === 0;
+  elements.duplicateSelection.disabled = isBusy || selectionCount === 0;
+  elements.pasteSelection.disabled = isBusy || !clipboardAvailable;
 }
 
 function setRecoveryBusy(busy) {
@@ -430,6 +445,7 @@ function renderSelectionProperties(details) {
   elements.selectionSummary.textContent =
     count === 0 ? 'No selection' : count === 1 ? '1 element' : `${count} elements`;
   elements.deleteSelection.disabled = count === 0;
+  updateClipboardActionState();
 
   const primary = details?.primary ?? null;
   elements.applyProperties.disabled =
@@ -691,6 +707,66 @@ async function deleteCurrentSelection() {
   }
 }
 
+async function copyCurrentSelection() {
+  if (!invoke) {
+    return;
+  }
+  setBusy(true);
+  try {
+    const result = await invoke('copy_selection');
+    clipboardAvailable = Number(result?.count ?? 0) > 0;
+    setStatus(`Copied ${result.count} ${result.count === 1 ? 'element' : 'elements'}`);
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function pasteCurrentSelection() {
+  if (!invoke || !clipboardAvailable) {
+    return;
+  }
+  setBusy(true);
+  try {
+    const result = await invoke('paste_selection');
+    renderState(result.state);
+    await refreshPresentation({ preserveSelection: false });
+    const selection = result.selectedElementIds ?? [];
+    svgSurface.setSelection(selection);
+    keyboardSurface?.syncSelectionState(selection);
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus(`Pasted ${selection.length} ${selection.length === 1 ? 'element' : 'elements'}`);
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function duplicateCurrentSelection() {
+  if (!invoke || Number(currentSelectionProperties?.count ?? 0) === 0) {
+    return;
+  }
+  setBusy(true);
+  try {
+    const result = await invoke('duplicate_selection');
+    renderState(result.state);
+    await refreshPresentation({ preserveSelection: false });
+    const selection = result.selectedElementIds ?? [];
+    svgSurface.setSelection(selection);
+    keyboardSurface?.syncSelectionState(selection);
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus(`Duplicated ${selection.length} ${selection.length === 1 ? 'element' : 'elements'}`);
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function applyElementProperties(event) {
   event.preventDefault();
   const primary = currentSelectionProperties?.primary;
@@ -915,6 +991,10 @@ async function runAction(command, args, successMessage, options = {}) {
       setStatus('Cancelled');
       return;
     }
+    if (options.resetClipboard === true) {
+      clipboardAvailable = false;
+      updateClipboardActionState();
+    }
 
     if (options.refreshPresentation === true) {
       await refreshPresentation({ preserveSelection: options.preserveSelection !== false });
@@ -945,6 +1025,8 @@ async function restoreRecovery() {
   try {
     const result = await invoke('restore_recovery');
     renderState(result.state);
+    clipboardAvailable = false;
+    updateClipboardActionState();
     await refreshPresentation({ preserveSelection: false });
     elements.recoveryDialog.close();
     setBusy(false);
@@ -1008,6 +1090,7 @@ elements.newDocument.addEventListener('click', () => {
     syncRecovery: true,
     refreshPresentation: true,
     preserveSelection: false,
+    resetClipboard: true,
   });
 });
 
@@ -1021,9 +1104,10 @@ elements.openDocument.addEventListener('click', () => {
         ? 'Legacy file imported as an unsaved Next copy'
         : 'Document opened',
     {
-    syncRecovery: true,
-    refreshPresentation: true,
+      syncRecovery: true,
+      refreshPresentation: true,
       preserveSelection: false,
+      resetClipboard: true,
     },
   );
 });
@@ -1145,6 +1229,18 @@ elements.drawOrthogonalConnector.addEventListener('click', () => {
   setConnectorTool(connectorTool === 'orthogonal' ? null : 'orthogonal');
 });
 
+elements.copySelection.addEventListener('click', () => {
+  void copyCurrentSelection();
+});
+
+elements.pasteSelection.addEventListener('click', () => {
+  void pasteCurrentSelection();
+});
+
+elements.duplicateSelection.addEventListener('click', () => {
+  void duplicateCurrentSelection();
+});
+
 elements.deleteSelection.addEventListener('click', () => {
   void deleteCurrentSelection();
 });
@@ -1247,9 +1343,13 @@ window.addEventListener(
         { textEditing: isTextEditingTarget(event.target) },
       );
       if (shortcut) {
+        const selectionCount = Number(currentSelectionProperties?.count ?? 0);
         if (
-          shortcut === 'delete-selection' &&
-          Number(currentSelectionProperties?.count ?? 0) === 0
+          ((shortcut === 'delete-selection' ||
+            shortcut === 'copy-selection' ||
+            shortcut === 'duplicate-selection') &&
+            selectionCount === 0) ||
+          (shortcut === 'paste-selection' && !clipboardAvailable)
         ) {
           return;
         }
@@ -1261,6 +1361,12 @@ window.addEventListener(
           undoCurrentDocument();
         } else if (shortcut === 'redo') {
           redoCurrentDocument();
+        } else if (shortcut === 'copy-selection') {
+          void copyCurrentSelection();
+        } else if (shortcut === 'paste-selection') {
+          void pasteCurrentSelection();
+        } else if (shortcut === 'duplicate-selection') {
+          void duplicateCurrentSelection();
         } else if (shortcut === 'delete-selection') {
           void deleteCurrentSelection();
         }
