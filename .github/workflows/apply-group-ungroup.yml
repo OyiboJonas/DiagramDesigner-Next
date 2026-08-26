@@ -21,27 +21,9 @@ jobs:
           toolchain: 1.85.0
           components: rustfmt
       - name: Apply product patch
-        run: python3 scripts/apply-group-ungroup.py
-      - name: Resolve logical group IDs on keyboard focus
-        shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('apps/desktop/ui/candidate-svg-keyboard.mjs')
-          text = path.read_text(encoding='utf-8')
-          old = """      const elementId = event.target?.getAttribute?.('data-element-id');
-              if (elementId && currentElements.some((entry) => entry.id === elementId)) {
-                controller.activate(elementId);
-"""
-          new = """      const rawElementId = event.target?.getAttribute?.('data-element-id');
-              const elementId = rawElementId ? resolveElementId(rawElementId) : null;
-              if (elementId && currentElements.some((entry) => entry.id === elementId)) {
-                controller.activate(elementId);
-"""
-          if text.count(old) != 1:
-              raise SystemExit(f'keyboard focus marker count={text.count(old)}')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          PY
+          python3 scripts/apply-group-ungroup.py
+          python3 scripts/fix-group-keyboard-focus.py
       - name: Format Rust
         run: |
           cargo fmt --all
