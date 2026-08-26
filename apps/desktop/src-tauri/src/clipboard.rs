@@ -57,9 +57,9 @@ impl fmt::Display for ClipboardError {
                 formatter,
                 "Selected element {element_id:?} must be a top-level scene root before it can be copied."
             ),
-            Self::SelectionSpansScenes => formatter.write_str(
-                "Clipboard selection must stay within one scene/layer."
-            ),
+            Self::SelectionSpansScenes => {
+                formatter.write_str("Clipboard selection must stay within one scene/layer.")
+            }
             Self::GroupCycle(element_id) => write!(
                 formatter,
                 "Structural group hierarchy contains a cycle at {element_id:?}."
@@ -718,10 +718,8 @@ mod tests {
     fn selection_spanning_two_scenes_is_rejected_explicitly() {
         let first = ElementId::new();
         let second = ElementId::new();
-        let mut document = document_with_elements(
-            vec![first],
-            vec![shape(first, PortId::new(), 10.0)],
-        );
+        let mut document =
+            document_with_elements(vec![first], vec![shape(first, PortId::new(), 10.0)]);
         document.pages.push(Page {
             id: PageId::new(),
             name: "Second page".to_owned(),
