@@ -4,7 +4,7 @@ import { buildRulerTicks } from './editor-interaction/snapping.mjs';
 import { isTextEditingTarget, resolveApplicationShortcut } from './editor-interaction/app-shortcuts.mjs';
 import { createZOrderRequest, isZOrderActionEnabled } from './editor-interaction/z-order-actions.mjs';
 import { isGroupActionEnabled, isUngroupActionEnabled } from './editor-interaction/group-actions.mjs';
-import { isClipboardSelectionActionEnabled } from './editor-interaction/clipboard-actions.mjs';
+import { isClipboardSelectionActionEnabled, isClipboardShortcutActionEnabled } from './editor-interaction/clipboard-actions.mjs';
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -1533,14 +1533,9 @@ window.addEventListener(
       );
       if (shortcut) {
         const selectionCount = Number(currentSelectionProperties?.count ?? 0);
-        const containsGroup = currentSelectionProperties?.containsGroup === true;
         if (
-          ((shortcut === 'delete-selection' ||
-            shortcut === 'copy-selection' ||
-            shortcut === 'duplicate-selection') &&
-            selectionCount === 0) ||
-          ((shortcut === 'copy-selection' || shortcut === 'duplicate-selection') && containsGroup) ||
-          (shortcut === 'paste-selection' && !clipboardAvailable)
+          (shortcut === 'delete-selection' && selectionCount === 0) ||
+          !isClipboardShortcutActionEnabled({ shortcut, selectionCount, clipboardAvailable })
         ) {
           return;
         }
