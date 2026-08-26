@@ -26,10 +26,10 @@ jobs:
         run: python scripts/check-desktop-command-acl.py
       - name: Diff check
         run: git diff --check
-      - name: Commit product changes and remove temporary helpers
+      - name: Commit ACL product files
         run: |
-          git rm .github/scripts/apply-desktop-command-acl-contract.py .github/workflows/apply-desktop-command-acl-contract.yml
-          git add .github/workflows/rust.yml scripts/check-desktop-command-acl.py apps/desktop/src-tauri/build.rs apps/desktop/src-tauri/permissions/editor.toml apps/desktop/src-tauri/capabilities/main-editor.json
+          git rm .github/scripts/apply-desktop-command-acl-contract.py
+          git add scripts/check-desktop-command-acl.py apps/desktop/src-tauri/build.rs apps/desktop/src-tauri/permissions/editor.toml apps/desktop/src-tauri/capabilities/main-editor.json
           git diff --cached --quiet && { echo 'No product changes staged'; exit 1; }
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
