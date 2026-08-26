@@ -15,6 +15,7 @@ import {
 } from "./editor-interaction/move-gesture.mjs";
 import { resolveMouseSelection } from "./editor-interaction/mouse-selection.mjs";
 import { snapMoveDelta } from "./editor-interaction/snapping.mjs";
+import { createSelectionGroupIndex } from "./editor-interaction/selection-groups.mjs";
 import {
   TransformGestureController,
   bindTransformPointerSurface,
@@ -106,10 +107,13 @@ export function createCandidateSvgSurface(
   let endpointCommitPending = false;
   let selectedElementIds = [];
   let presentationGeometry = null;
+  let selectionGroupIndex = createSelectionGroupIndex();
   let interactionSettings = { ...DEFAULT_INTERACTION_SETTINGS };
 
   const applySelection = (elementIds, { notify = true } = {}) => {
-    const requested = normalizeElementIds(elementIds);
+    const requested = normalizeElementIds(
+      normalizeElementIds(elementIds).map((elementId) => selectionGroupIndex.resolveId(elementId)),
+    );
     if (svg) {
       for (const element of svg.querySelectorAll(`[${SELECTED_ATTRIBUTE}]`)) {
         element.removeAttribute(SELECTED_ATTRIBUTE);
@@ -119,12 +123,18 @@ export function createCandidateSvgSurface(
     const applied = [];
     if (svg) {
       for (const elementId of requested) {
-        const element = findRenderableElement(svg, elementId);
-        if (!element) {
-          continue;
+        let rendered = false;
+        for (const renderElementId of selectionGroupIndex.renderIds([elementId])) {
+          const element = findRenderableElement(svg, renderElementId);
+          if (!element) {
+            continue;
+          }
+          element.setAttribute(SELECTED_ATTRIBUTE, "true");
+          rendered = true;
         }
-        element.setAttribute(SELECTED_ATTRIBUTE, "true");
-        applied.push(elementId);
+        if (rendered) {
+          applied.push(elementId);
+        }
       }
     }
 
@@ -176,7 +186,7 @@ export function createCandidateSvgSurface(
       `translate(${formatFinite(preview.deltaMm?.x)} ${formatFinite(preview.deltaMm?.y)})`,
     );
 
-    for (const elementId of preview.elementIds) {
+    for (const elementId of selectionGroupIndex.renderIds(preview.elementIds)) {
       const source = findRenderableElement(svg, elementId);
       if (!source) {
         continue;
@@ -208,7 +218,7 @@ export function createCandidateSvgSurface(
     const mmPerPx = Math.max(viewBox.width / rect.width, viewBox.height / rect.height);
     const snapped = snapMoveDelta({
       deltaMm,
-      elementIds,
+      elementIds: selectionGroupIndex.snapIds(elementIds),
       elements: presentationGeometry.snapElements,
       pageSize: {
         width: presentationGeometry.widthMm,
@@ -297,10 +307,13 @@ export function createCandidateSvgSurface(
           return null;
         }
         const target = event.target?.closest?.("[data-element-id]");
-        const hitElementId =
+        const rawHitElementId =
           target && svg.contains(target) && !target.closest(`[${MOVE_OVERLAY_ATTRIBUTE}]`)
             ? target.getAttribute("data-element-id")
             : null;
+        const hitElementId = rawHitElementId
+          ? selectionGroupIndex.resolveId(rawHitElementId)
+          : null;
         const resolved = resolveMouseSelection({
           currentIds: selectedElementIds,
           hitElementId,
@@ -483,6 +496,7 @@ export function createCandidateSvgSurface(
       host.replaceChildren();
       svg = null;
       presentationGeometry = null;
+      selectionGroupIndex = createSelectionGroupIndex();
 
       if (!presentation?.svg) {
         applyGridStyle(host, presentationGeometry, interactionSettings);
@@ -508,14 +522,17 @@ export function createCandidateSvgSurface(
       host.style.aspectRatio = `${presentation.widthMm} / ${presentation.heightMm}`;
       host.replaceChildren(svg);
 
+      selectionGroupIndex = createSelectionGroupIndex(presentation.selectionGroups ?? []);
       presentationGeometry = Object.freeze({
         widthMm: presentation.widthMm,
         heightMm: presentation.heightMm,
         // Geometry comes from Rust/document state. Filtering only removes elements
         // that the current renderer candidate did not actually materialize.
         snapElements: Object.freeze(
-          normalizeSnapElements(presentation.snapElements ?? []).filter((element) =>
-            Boolean(findRenderableElement(svg, element.elementId)),
+          normalizeSnapElements(presentation.snapElements ?? []).filter(
+            (element) =>
+              selectionGroupIndex.isGroup(element.elementId) ||
+              Boolean(findRenderableElement(svg, element.elementId)),
           ),
         ),
         portTargets: Object.freeze(normalizePortTargets(presentation.portTargets ?? [])),
@@ -606,6 +623,10 @@ export function createCandidateSvgSurface(
       return Object.freeze({ ...interactionSettings });
     },
 
+    resolveSelectionId(elementId) {
+      return selectionGroupIndex.resolveId(elementId);
+    },
+
     setSelection(elementIds) {
       return applySelection(elementIds);
     },
@@ -634,6 +655,7 @@ export function createCandidateSvgSurface(
       host.replaceChildren();
       svg = null;
       presentationGeometry = null;
+      selectionGroupIndex = createSelectionGroupIndex();
       applyGridStyle(host, presentationGeometry, interactionSettings);
     },
 
@@ -670,6 +692,7 @@ export function createCandidateSvgSurface(
       host.replaceChildren();
       svg = null;
       presentationGeometry = null;
+      selectionGroupIndex = createSelectionGroupIndex();
       applyGridStyle(host, presentationGeometry, interactionSettings);
     },
   });

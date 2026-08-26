@@ -17,6 +17,7 @@ export function createCandidateSvgKeyboardSurface(
   {
     getSelection,
     setSelection,
+    resolveElementId = (elementId) => elementId,
     onStatus = () => {},
   } = {},
 ) {
@@ -25,6 +26,9 @@ export function createCandidateSvgKeyboardSurface(
   }
   if (typeof getSelection !== 'function' || typeof setSelection !== 'function') {
     throw new TypeError('candidate keyboard selection callbacks must be functions');
+  }
+  if (typeof resolveElementId !== 'function') {
+    throw new TypeError('candidate keyboard element resolver must be a function');
   }
   if (typeof onStatus !== 'function') {
     throw new TypeError('candidate keyboard status callback must be a function');
@@ -35,7 +39,7 @@ export function createCandidateSvgKeyboardSurface(
   let focusWasInside = false;
 
   const refresh = ({ restoreFocus = false } = {}) => {
-    currentElements = listKeyboardElements(host);
+    currentElements = listKeyboardElements(host, resolveElementId);
     const selectedIds = normalizeCurrentSelection(getSelection(), currentElements);
     controller.replaceElements(
       currentElements.map((entry) => entry.id),
@@ -59,7 +63,8 @@ export function createCandidateSvgKeyboardSurface(
   const listeners = {
     focusin: (event) => {
       focusWasInside = true;
-      const elementId = event.target?.getAttribute?.('data-element-id');
+      const rawElementId = event.target?.getAttribute?.('data-element-id');
+      const elementId = rawElementId ? resolveElementId(rawElementId) : null;
       if (elementId && currentElements.some((entry) => entry.id === elementId)) {
         controller.activate(elementId);
         applyAccessibilityState(host, currentElements, controller.snapshot());
@@ -130,13 +135,14 @@ export function createCandidateSvgKeyboardSurface(
   });
 }
 
-function listKeyboardElements(host) {
+function listKeyboardElements(host, resolveElementId) {
   const entries = [];
   for (const element of host.querySelectorAll?.(ELEMENT_SELECTOR) ?? []) {
     if (element.closest?.(MOVE_OVERLAY_SELECTOR) || element.closest?.(SNAP_GUIDES_SELECTOR)) {
       continue;
     }
-    const id = element.getAttribute('data-element-id');
+    const rawId = element.getAttribute('data-element-id');
+    const id = rawId ? resolveElementId(rawId) : null;
     if (!id || entries.some((entry) => entry.id === id)) {
       continue;
     }
