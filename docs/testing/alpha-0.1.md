@@ -15,6 +15,17 @@ The alpha should support a complete small-diagram workflow without falling back 
 - save native `.ddnx`, reopen it, and recover unsaved state after an interrupted/dirty session;
 - import legacy `.ddd` and `.ddt` as detached, unsaved Next copies that can only be saved as `.ddnx`.
 
+## Capabilities added after the original alpha baseline
+
+The `0.1.0-alpha.1` version label is still used while the native alpha smoke gate remains open, but current `main` builds include additional editor-productivity work that was intentionally outside the original baseline:
+
+- structured Copy/Paste/Duplicate with deterministic offset, fresh identities and connector remapping;
+- z-order controls for top-level elements and structural groups;
+- Group/Ungroup with logical group selection and atomic group movement;
+- group-aware Copy/Paste/Duplicate that preserves nested group hierarchy and internal references.
+
+These additions are covered by repository, frontend, DDNX and Windows/Tauri automation. They do **not** replace the outstanding human Windows GUI smoke required by the alpha-readiness gate, so the native smoke path below remains focused on the original alpha baseline.
+
 ## Native Windows alpha smoke path
 
 1. Extract the workflow artifact to a normal local folder and start `DiagramDesigner-Next-Alpha.exe`.
@@ -43,7 +54,6 @@ If that recovery checkpoint cannot be written, the close request is blocked and 
 - Legacy `.ddd`/`.ddt` support is import-only. DiagramDesigner Next never writes those formats.
 - Rich/mixed legacy text can be displayed but the basic text field deliberately refuses destructive flattening of unsupported formatting or dynamic fields.
 - Basic appearance currently covers shape stroke/fill and text colour. Gradients, dash styles, connector markers and advanced text formatting are not editor controls yet.
-- Copy/paste/duplicate, z-order controls and grouping UI are post-alpha.
 - The executable depends on the Windows WebView2 runtime, normally present on current Windows 10/11 systems.
 
 ## Failure information
