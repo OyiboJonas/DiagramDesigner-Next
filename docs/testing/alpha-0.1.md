@@ -17,12 +17,13 @@ The alpha should support a complete small-diagram workflow without falling back 
 
 ## Capabilities added after the original alpha baseline
 
-The `0.1.0-alpha.1` version label is still used while the native alpha smoke gate remains open, but current `main` builds include additional editor-productivity work that was intentionally outside the original baseline:
+The `0.1.0-alpha.1` version label is still used while the native alpha smoke gate remains open, but current `main` builds include additional editor-productivity and persistence work that was intentionally outside the original baseline:
 
 - structured Copy/Paste/Duplicate with deterministic offset, fresh identities and connector remapping;
 - z-order controls for top-level elements and structural groups;
 - Group/Ungroup with logical group selection and atomic group movement;
-- group-aware Copy/Paste/Duplicate that preserves nested group hierarchy and internal references.
+- group-aware Copy/Paste/Duplicate that preserves nested group hierarchy and internal references;
+- explicit Save As with `Ctrl/Cmd+Shift+S`, plus native confirmation before a newly selected existing `.ddnx` destination is replaced.
 
 These additions are covered by repository, frontend, DDNX and Windows/Tauri automation. They do **not** replace the outstanding human Windows GUI smoke required by the alpha-readiness gate, so the native smoke path below remains focused on the original alpha baseline.
 
@@ -41,6 +42,8 @@ These additions are covered by repository, frontend, DDNX and Windows/Tauri auto
 11. Import a legacy `.ddd` or `.ddt`. Verify the UI identifies it as an imported copy and that Save asks for a new `.ddnx` destination rather than modifying the legacy source.
 12. Make an unsaved edit and close the app. Restart it and verify the recovery decision appears; restore the snapshot and verify the recovered copy is still unsaved until explicitly saved.
 
+For current builds, also verify that Save As opens a new DDNX destination picker and that choosing an already-existing DDNX asks for explicit native confirmation. Choosing No/Cancel must leave the document and its current save association unchanged. A normal Save on an already-associated native DDNX continues to replace that exact file atomically without an additional overwrite prompt.
+
 ## Alpha close/recovery behavior
 
 Closing the main window with dirty, imported or recovered state does **not** silently discard the current document. Before the native window is allowed to close, the Rust desktop boundary writes a fresh, atomically persisted DDNX recovery checkpoint. On the next start, the existing recovery flow offers Restore or Discard. This checkpoint is not a normal Save and does not overwrite the user's document or legacy source.
@@ -50,7 +53,6 @@ If that recovery checkpoint cannot be written, the close request is blocked and 
 ## Known alpha limitations
 
 - Windows only for this alpha; no installer and no code signing.
-- New files have no Save As/overwrite-confirmation flow yet. A first Save refuses an already-existing target rather than overwriting it.
 - Legacy `.ddd`/`.ddt` support is import-only. DiagramDesigner Next never writes those formats.
 - Rich/mixed legacy text can be displayed but the basic text field deliberately refuses destructive flattening of unsupported formatting or dynamic fields.
 - Basic appearance currently covers shape stroke/fill and text colour. Gradients, dash styles, connector markers and advanced text formatting are not editor controls yet.
