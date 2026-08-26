@@ -72,7 +72,10 @@ fn fixture() -> (NextArtifact, [ElementId; 3]) {
 }
 
 fn roots(app: &ApplicationSession) -> Vec<ElementId> {
-    app.session().document().pages[0].layers[0].scene.roots.clone()
+    app.session().document().pages[0].layers[0]
+        .scene
+        .roots
+        .clone()
 }
 
 #[test]

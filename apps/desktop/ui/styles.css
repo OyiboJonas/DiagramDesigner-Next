@@ -893,3 +893,41 @@ button.toggle-button[aria-pressed="true"] {
   padding: 2px;
   border-radius: 6px;
 }
+
+/* Z-order arrange controls */
+.arrange-section {
+  margin-top: 12px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+}
+
+.arrange-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.arrange-heading h3 {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.arrange-heading span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.arrange-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.arrange-actions button {
+  width: 100%;
+  padding-inline: 8px;
+}

@@ -2,6 +2,7 @@ import { createSvgKeyboardSurface } from './svg-keyboard.mjs';
 import { createSvgSurface } from './svg-surface.mjs';
 import { buildRulerTicks } from './editor-interaction/snapping.mjs';
 import { isTextEditingTarget, resolveApplicationShortcut } from './editor-interaction/app-shortcuts.mjs';
+import { createZOrderRequest, isZOrderActionEnabled } from './editor-interaction/z-order-actions.mjs';
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -14,6 +15,10 @@ const elements = {
   copySelection: document.querySelector('#copy-selection'),
   pasteSelection: document.querySelector('#paste-selection'),
   duplicateSelection: document.querySelector('#duplicate-selection'),
+  sendToBack: document.querySelector('#send-to-back'),
+  sendBackward: document.querySelector('#send-backward'),
+  bringForward: document.querySelector('#bring-forward'),
+  bringToFront: document.querySelector('#bring-to-front'),
   toggleGrid: document.querySelector('#toggle-grid'),
   toggleSnap: document.querySelector('#toggle-snap'),
   addRectangle: document.querySelector('#add-rectangle'),
@@ -82,6 +87,13 @@ const elements = {
   recoveryDiscard: document.querySelector('#recovery-discard'),
 };
 
+const zOrderButtons = [
+  elements.sendToBack,
+  elements.sendBackward,
+  elements.bringForward,
+  elements.bringToFront,
+];
+
 const actionButtons = [
   elements.newDocument,
   elements.openDocument,
@@ -91,6 +103,7 @@ const actionButtons = [
   elements.copySelection,
   elements.pasteSelection,
   elements.duplicateSelection,
+  ...zOrderButtons,
   elements.addRectangle,
   elements.addEllipse,
   elements.addText,
@@ -156,6 +169,7 @@ function setBusy(busy) {
   }
   elements.pageSelect.disabled = busy;
   elements.layerSelect.disabled = busy;
+  updateZOrderActionState();
   if (!busy) {
     const selectionCount = Number(currentSelectionProperties?.count ?? 0);
     const primary = currentSelectionProperties?.primary ?? null;
@@ -173,6 +187,42 @@ function updateClipboardActionState() {
   elements.copySelection.disabled = isBusy || selectionCount === 0;
   elements.duplicateSelection.disabled = isBusy || selectionCount === 0;
   elements.pasteSelection.disabled = isBusy || !clipboardAvailable;
+}
+
+function activeLayerForZOrder() {
+  const pages = currentNavigation?.pages ?? [];
+  const activePage = pages.find((page) => page.pageId === currentNavigation?.activePageId) ?? null;
+  return activePage?.layers.find((layer) => layer.layerId === currentNavigation?.activeLayerId) ?? null;
+}
+
+function updateZOrderActionState() {
+  const selectionCount = Number(currentSelectionProperties?.count ?? 0);
+  const activeLayer = activeLayerForZOrder();
+  const enabled = isZOrderActionEnabled({
+    selectionCount,
+    layerVisible: activeLayer?.visible === true,
+    layerLocked: activeLayer?.locked !== false,
+    busy: isBusy,
+  });
+  const reason = isBusy
+    ? 'Finish the current action first'
+    : selectionCount === 0
+      ? 'Select one or more elements to arrange them'
+      : !activeLayer?.visible
+        ? 'Show the active layer before arranging elements'
+        : activeLayer?.locked
+          ? 'Unlock the active layer before arranging elements'
+          : 'Arrange the current selection';
+  const enabledTitles = [
+    'Send the selection behind all other elements',
+    'Move the selection one step backward',
+    'Move the selection one step forward',
+    'Bring the selection in front of all other elements',
+  ];
+  zOrderButtons.forEach((button, index) => {
+    button.disabled = !enabled;
+    button.title = enabled ? enabledTitles[index] : reason;
+  });
 }
 
 function setRecoveryBusy(busy) {
@@ -251,6 +301,7 @@ function updateStructureDisabledState() {
     : 'Choose a visible, unlocked layer to draw connectors';
   elements.applyPageProperties.disabled = isBusy || !activePage;
   elements.applyLayerProperties.disabled = isBusy || !activeLayer;
+  updateZOrderActionState();
 }
 
 function renderNavigation(navigation) {
@@ -446,6 +497,7 @@ function renderSelectionProperties(details) {
     count === 0 ? 'No selection' : count === 1 ? '1 element' : `${count} elements`;
   elements.deleteSelection.disabled = count === 0;
   updateClipboardActionState();
+  updateZOrderActionState();
 
   const primary = details?.primary ?? null;
   elements.applyProperties.disabled =
@@ -760,6 +812,34 @@ async function duplicateCurrentSelection() {
     await refreshSelectionProperties();
     scheduleRecoverySync(250);
     setStatus(`Duplicated ${selection.length} ${selection.length === 1 ? 'element' : 'elements'}`);
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function reorderCurrentSelection(operation) {
+  if (!invoke || Number(currentSelectionProperties?.count ?? 0) === 0) {
+    return;
+  }
+  const labels = {
+    sendToBack: 'Selection sent to back',
+    sendBackward: 'Selection moved backward',
+    bringForward: 'Selection moved forward',
+    bringToFront: 'Selection brought to front',
+  };
+  setBusy(true);
+  try {
+    const result = await invoke('reorder_selection', { request: createZOrderRequest(operation) });
+    renderState(result.state);
+    await refreshPresentation({ preserveSelection: true });
+    const selection = result.selectedElementIds ?? svgSurface.selectedElementIds;
+    svgSurface.setSelection(selection);
+    keyboardSurface?.syncSelectionState(selection);
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus(labels[operation]);
   } catch (error) {
     setStatus(formatInvokeError(error));
   } finally {
@@ -1239,6 +1319,22 @@ elements.pasteSelection.addEventListener('click', () => {
 
 elements.duplicateSelection.addEventListener('click', () => {
   void duplicateCurrentSelection();
+});
+
+elements.sendToBack.addEventListener('click', () => {
+  void reorderCurrentSelection('sendToBack');
+});
+
+elements.sendBackward.addEventListener('click', () => {
+  void reorderCurrentSelection('sendBackward');
+});
+
+elements.bringForward.addEventListener('click', () => {
+  void reorderCurrentSelection('bringForward');
+});
+
+elements.bringToFront.addEventListener('click', () => {
+  void reorderCurrentSelection('bringToFront');
 });
 
 elements.deleteSelection.addEventListener('click', () => {
