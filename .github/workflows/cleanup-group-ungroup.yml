@@ -1,0 +1,31 @@
+name: Clean grouping patch helpers
+
+on:
+  push:
+    branches: [desktop-group-ungroup]
+    paths:
+      - '.github/workflows/cleanup-group-ungroup.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-group-ungroup
+      - name: Remove temporary patch infrastructure
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm \
+            .github/workflows/apply-group-ungroup.yml \
+            .github/workflows/cleanup-group-ungroup.yml \
+            scripts/apply-group-ungroup.py \
+            scripts/fix-group-keyboard-focus.py
+          git commit -m "Build: remove grouping patch helpers"
+          git push origin HEAD:desktop-group-ungroup
