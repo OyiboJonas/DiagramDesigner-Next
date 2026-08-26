@@ -1,0 +1,365 @@
+name: Apply clipboard snapshot fix
+
+on:
+  push:
+    branches:
+      - desktop-copy-paste-duplicate
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-copy-paste-duplicate
+          fetch-depth: 0
+      - name: Apply clipboard snapshot semantics
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          clipboard = Path('apps/desktop/src-tauri/src/clipboard.rs')
+          s = clipboard.read_text(encoding='utf-8')
+
+          old = 'use next_domain::{Connection, Document, Element, ElementId, ElementKind, Endpoint, Point, PortId};'
+          new = '''use next_domain::{
+              Color, Connection, Document, Element, ElementId, ElementKind, Endpoint, FillStyle, Point,
+              PortId, StrokeStyle, StyleId,
+          };'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''pub const PASTE_OFFSET_MM: f64 = 5.0;
+
+          #[derive(Debug, Clone)]
+          pub struct ClipboardPayload {
+              elements: Vec<Element>,
+          }
+
+          #[derive(Debug)]
+          pub struct ClipboardInstantiation {
+              pub elements: Vec<Element>,
+              pub element_ids: Vec<ElementId>,
+              pub source_element_ids: BTreeMap<ElementId, ElementId>,
+          }
+          '''
+          new = '''pub const PASTE_OFFSET_MM: f64 = 5.0;
+          const APPEARANCE_STYLE_NAMESPACE: &str = "diagramdesigner-next:element-appearance";
+
+          #[derive(Debug, Clone)]
+          pub struct ClipboardPayload {
+              elements: Vec<Element>,
+              owned_appearance: BTreeMap<ElementId, ClipboardAppearanceSnapshot>,
+          }
+
+          #[derive(Debug, Clone)]
+          struct ClipboardAppearanceSnapshot {
+              stroke: Option<StrokeStyle>,
+              fill: Option<FillStyle>,
+              text_color: Option<Color>,
+          }
+
+          #[derive(Debug)]
+          pub struct ClipboardAppearanceUpdate {
+              pub element_id: ElementId,
+              pub stroke: Option<StrokeStyle>,
+              pub fill: Option<FillStyle>,
+              pub text_color: Option<Color>,
+          }
+
+          #[derive(Debug)]
+          pub struct ClipboardInstantiation {
+              pub elements: Vec<Element>,
+              pub element_ids: Vec<ElementId>,
+              pub appearance_updates: Vec<ClipboardAppearanceUpdate>,
+          }
+          '''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''pub enum ClipboardError {
+              EmptySelection,
+              MissingElement(ElementId),
+              GroupUnsupported(ElementId),
+          }'''
+          new = '''pub enum ClipboardError {
+              EmptySelection,
+              MissingElement(ElementId),
+              MissingAppearanceStyle(ElementId),
+              GroupUnsupported(ElementId),
+          }'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''            Self::GroupUnsupported(element_id) => write!(
+                  formatter,
+                  "Copying structural group {element_id:?} is not available in this first clipboard slice; ungroup it first."
+              ),'''
+          new = '''            Self::MissingAppearanceStyle(element_id) => write!(
+                  formatter,
+                  "Element {element_id:?} references an element-owned appearance style that is missing."
+              ),
+              Self::GroupUnsupported(element_id) => write!(
+                  formatter,
+                  "Copying structural group {element_id:?} is not available in this first clipboard slice; ungroup it first."
+              ),'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''        let mut instantiated = Vec::with_capacity(self.elements.len());
+              let mut selected = Vec::with_capacity(self.elements.len());
+              for source in &self.elements {'''
+          new = '''        let mut instantiated = Vec::with_capacity(self.elements.len());
+              let mut selected = Vec::with_capacity(self.elements.len());
+              let mut appearance_updates = Vec::new();
+              for source in &self.elements {'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''            element.id = element_ids[&source.id];
+                  selected.push(element.id);
+                  element.import = None;'''
+          new = '''            element.id = element_ids[&source.id];
+                  selected.push(element.id);
+                  if let Some(appearance) = self.owned_appearance.get(&source.id) {
+                      element.style_id = None;
+                      appearance_updates.push(ClipboardAppearanceUpdate {
+                          element_id: element.id,
+                          stroke: appearance.stroke.clone(),
+                          fill: appearance.fill.clone(),
+                          text_color: appearance.text_color,
+                      });
+                  }
+                  element.import = None;'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''        ClipboardInstantiation {
+                  elements: instantiated,
+                  element_ids: selected,
+                  source_element_ids: element_ids,
+              }'''
+          new = '''        ClipboardInstantiation {
+                  elements: instantiated,
+                  element_ids: selected,
+                  appearance_updates,
+              }'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          marker = '''    Ok(ClipboardPayload {
+              elements: ordered_ids
+                  .into_iter()
+                  .map(|element_id| by_id[&element_id].clone())
+                  .collect(),
+          })'''
+          replacement = '''    let mut owned_appearance = BTreeMap::new();
+              for element_id in &ordered_ids {
+                  let element = by_id[element_id];
+                  let dedicated_style_id = StyleId::v5(element_id.0, APPEARANCE_STYLE_NAMESPACE);
+                  if element.style_id != Some(dedicated_style_id) {
+                      continue;
+                  }
+                  let style = document
+                      .styles
+                      .iter()
+                      .find(|style| style.id == dedicated_style_id)
+                      .ok_or(ClipboardError::MissingAppearanceStyle(*element_id))?;
+                  owned_appearance.insert(
+                      *element_id,
+                      ClipboardAppearanceSnapshot {
+                          stroke: style.stroke.clone(),
+                          fill: style.fill.clone(),
+                          text_color: style.text_color,
+                      },
+                  );
+              }
+
+              Ok(ClipboardPayload {
+                  elements: ordered_ids
+                      .into_iter()
+                      .map(|element_id| by_id[&element_id].clone())
+                      .collect(),
+                  owned_appearance,
+              })'''
+          assert marker in s
+          s = s.replace(marker, replacement, 1)
+
+          old = '''            ],
+              };
+
+              let first = payload.instantiate(1);'''
+          new = '''            ],
+                  owned_appearance: BTreeMap::new(),
+              };
+
+              let first = payload.instantiate(1);'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          test_marker = '''    #[test]
+              fn capture_rejects_structural_groups() {'''
+          test = '''    #[test]
+              fn capture_freezes_element_owned_appearance_at_copy_time() {
+                  let shape_id = ElementId::new();
+                  let port_id = PortId::new();
+                  let style_id = StyleId::v5(shape_id.0, APPEARANCE_STYLE_NAMESPACE);
+                  let mut styled_shape = shape(shape_id, port_id);
+                  styled_shape.style_id = Some(style_id);
+                  let page_id = PageId::new();
+                  let layer_id = LayerId::new();
+                  let original_fill = Color::Rgba {
+                      r: 12,
+                      g: 34,
+                      b: 56,
+                      a: 255,
+                  };
+                  let mut document = Document {
+                      id: DocumentId::new(),
+                      name: "Clipboard appearance fixture".to_owned(),
+                      defaults: DocumentDefaults {
+                          font_family: "Arial".to_owned(),
+                          font_size_pt: 10.0,
+                          font_style_bits: 0,
+                          object_shadows: false,
+                          auto_line_break: true,
+                          connector_label_style: ConnectorLabelStyle::Transparent,
+                      },
+                      master_layers: Vec::new(),
+                      pages: vec![Page {
+                          id: page_id,
+                          name: "Page".to_owned(),
+                          size_mm: Size {
+                              width: 210.0,
+                              height: 297.0,
+                          },
+                          layers: vec![Layer {
+                              id: layer_id,
+                              name: "Layer".to_owned(),
+                              visible: true,
+                              locked: false,
+                              draw_color: None,
+                              scene: Scene {
+                                  roots: vec![shape_id],
+                                  elements: vec![styled_shape],
+                              },
+                          }],
+                      }],
+                      styles: vec![next_domain::ElementStyle {
+                          id: style_id,
+                          stroke: None,
+                          fill: Some(FillStyle {
+                              color: original_fill,
+                              gradient: None,
+                          }),
+                          text_color: None,
+                      }],
+                      assets: Vec::new(),
+                      import: None,
+                  };
+
+                  let payload = capture_selection(&document, &[shape_id]).expect("capture");
+
+                  // Clipboard state is a copy-time snapshot. Later source edits or deletion
+                  // must not change or invalidate what Paste will instantiate.
+                  document.styles[0].fill = Some(FillStyle {
+                      color: Color::Rgba {
+                          r: 200,
+                          g: 210,
+                          b: 220,
+                          a: 255,
+                      },
+                      gradient: None,
+                  });
+                  document.pages[0].layers[0].scene.elements.clear();
+                  document.pages[0].layers[0].scene.roots.clear();
+                  drop(document);
+
+                  let instantiated = payload.instantiate(1);
+                  assert_eq!(instantiated.appearance_updates.len(), 1);
+                  assert_eq!(instantiated.elements[0].style_id, None);
+                  assert_eq!(
+                      instantiated.appearance_updates[0].fill,
+                      Some(FillStyle {
+                          color: original_fill,
+                          gradient: None,
+                      })
+                  );
+              }
+
+              #[test]
+              fn capture_rejects_structural_groups() {'''
+          assert test_marker in s
+          s = s.replace(test_marker, test, 1)
+
+          clipboard.write_text(s, encoding='utf-8')
+
+          lib = Path('apps/desktop/src-tauri/src/lib.rs')
+          s = lib.read_text(encoding='utf-8')
+          s = s.replace('RichTextDocument, RichTextToken, Scene, Size, StrokeStyle, StyleId, TextBlock,',
+                        'RichTextDocument, RichTextToken, Scene, Size, StrokeStyle, TextBlock,', 1)
+
+          paste_pattern = re.compile(r'''    let mut instantiated = clipboard\.payload\.instantiate\(next_step\);\n    let selected = instantiated\.element_ids\.clone\(\);\n    let appearance_updates = prepare_clipboard_appearance_updates\(\n        document\.session\.session\(\)\.document\(\),\n        &mut instantiated,\n    \)\?;\n    document\n        \.session\n        \.create_elements\(target, instantiated\.elements, appearance_updates\)''')
+          paste_replacement = '''    let clipboard::ClipboardInstantiation {
+                  elements,
+                  element_ids: selected,
+                  appearance_updates,
+              } = clipboard.payload.instantiate(next_step);
+              let appearance_updates = appearance_updates
+                  .into_iter()
+                  .map(|update| ElementAppearanceUpdate {
+                      element_id: update.element_id,
+                      stroke: update.stroke,
+                      fill: update.fill,
+                      text_color: update.text_color,
+                  })
+                  .collect();
+              document
+                  .session
+                  .create_elements(target, elements, appearance_updates)'''
+          s, count = paste_pattern.subn(paste_replacement, s, count=1)
+          assert count == 1, count
+
+          duplicate_pattern = re.compile(r'''    let mut instantiated = payload\.instantiate\(1\);\n    let duplicated_ids = instantiated\.element_ids\.clone\(\);\n    let appearance_updates = prepare_clipboard_appearance_updates\(\n        document\.session\.session\(\)\.document\(\),\n        &mut instantiated,\n    \)\?;\n    document\n        \.session\n        \.create_elements\(target, instantiated\.elements, appearance_updates\)''')
+          duplicate_replacement = '''    let clipboard::ClipboardInstantiation {
+                  elements,
+                  element_ids: duplicated_ids,
+                  appearance_updates,
+              } = payload.instantiate(1);
+              let appearance_updates = appearance_updates
+                  .into_iter()
+                  .map(|update| ElementAppearanceUpdate {
+                      element_id: update.element_id,
+                      stroke: update.stroke,
+                      fill: update.fill,
+                      text_color: update.text_color,
+                  })
+                  .collect();
+              document
+                  .session
+                  .create_elements(target, elements, appearance_updates)'''
+          s, count = duplicate_pattern.subn(duplicate_replacement, s, count=1)
+          assert count == 1, count
+
+          prepare_pattern = re.compile(r'''\nfn prepare_clipboard_appearance_updates\(.*?\n\}\n\n(?=#\[tauri::command\]\nfn update_element_properties)''', re.S)
+          s, count = prepare_pattern.subn('\n', s, count=1)
+          assert count == 1, count
+
+          lib.write_text(s, encoding='utf-8')
+      - name: Format desktop Rust
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Verify diff
+        run: git diff --check
+      - name: Commit snapshot fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/desktop/src-tauri/src/clipboard.rs apps/desktop/src-tauri/src/lib.rs
+          git commit -m "Fix: freeze clipboard appearance at copy time"
+          git push origin HEAD:desktop-copy-paste-duplicate
