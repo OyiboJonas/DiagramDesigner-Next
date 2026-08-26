@@ -24,6 +24,7 @@
           <button id="new-document" type="button">New</button>
           <button id="open-document" type="button">Open…</button>
           <button id="save-document" class="primary" type="button">Save</button>
+          <button id="save-as-document" type="button" title="Save as a new DDNX file (Ctrl/Cmd+Shift+S)">Save As…</button>
           <span class="toolbar-separator" aria-hidden="true"></span>
           <button id="undo" type="button">Undo</button>
           <button id="redo" type="button">Redo</button>
@@ -185,7 +186,7 @@
           <p class="boundary-note">
             File access is owned by the Rust desktop boundary. The WebView has no generic filesystem permission.
             Pointer movement, connector previews, snapping and keyboard focus remain local to the presentation surface; only semantic selection, completed moves and completed connector creates cross IPC.
-            Tab enters or leaves the canvas; arrow keys, Home and End navigate elements; Space or Enter selects. Ctrl/Cmd+C, Ctrl/Cmd+V and Ctrl/Cmd+D copy, paste and duplicate outside text editing. Escape cancels an active connector tool or clears selection.
+            Tab enters or leaves the canvas; arrow keys, Home and End navigate elements; Space or Enter selects. Ctrl/Cmd+C, Ctrl/Cmd+V and Ctrl/Cmd+D copy, paste and duplicate outside text editing; Ctrl/Cmd+Shift+S opens Save As outside text editing. Escape cancels an active connector tool or clears selection.
           </p>
         </aside>
 

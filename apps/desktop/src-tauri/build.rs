@@ -42,6 +42,7 @@ fn main() {
             "new_document",
             "open_document",
             "save_document",
+            "save_as_document",
             "recovery_status",
             "restore_recovery",
             "discard_recovery",

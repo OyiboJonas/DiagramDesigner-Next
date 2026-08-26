@@ -34,6 +34,7 @@
     "allow-new-document",
     "allow-open-document",
     "allow-save-document",
+    "allow-save-as-document",
     "allow-recovery-status",
     "allow-restore-recovery",
     "allow-discard-recovery",
