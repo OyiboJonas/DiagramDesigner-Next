@@ -139,6 +139,11 @@ description = "Allows the main editor window to invoke the save_document applica
 commands.allow = ["save_document"]
 
 [[permission]]
+identifier = "allow-save-as-document"
+description = "Allows the main editor window to invoke the save_as_document application command."
+commands.allow = ["save_as_document"]
+
+[[permission]]
 identifier = "allow-recovery-status"
 description = "Allows the main editor window to invoke the recovery_status application command."
 commands.allow = ["recovery_status"]

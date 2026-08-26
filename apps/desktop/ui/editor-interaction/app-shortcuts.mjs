@@ -29,6 +29,9 @@ export function resolveApplicationShortcut(
   if (textEditing) {
     return null;
   }
+  if (command && normalized === 's' && shiftKey) {
+    return 'save-as';
+  }
   if (command && normalized === 'z') {
     return shiftKey ? 'redo' : 'undo';
   }

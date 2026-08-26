@@ -8,8 +8,14 @@ import {
 
 test('save is global while editor undo/delete stays out of text inputs', () => {
   assert.equal(resolveApplicationShortcut({ key: 's', ctrlKey: true }, { textEditing: true }), 'save');
+  assert.equal(resolveApplicationShortcut({ key: 's', ctrlKey: true, shiftKey: true }, { textEditing: true }), null);
   assert.equal(resolveApplicationShortcut({ key: 'z', ctrlKey: true }, { textEditing: true }), null);
   assert.equal(resolveApplicationShortcut({ key: 'Delete' }, { textEditing: true }), null);
+});
+
+test('save as resolves only outside text editing', () => {
+  assert.equal(resolveApplicationShortcut({ key: 's', ctrlKey: true, shiftKey: true }), 'save-as');
+  assert.equal(resolveApplicationShortcut({ key: 'S', metaKey: true, shiftKey: true }), 'save-as');
 });
 
 test('standard undo and redo variants resolve outside text editing', () => {

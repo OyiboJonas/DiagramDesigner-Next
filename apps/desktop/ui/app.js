@@ -12,6 +12,7 @@ const elements = {
   newDocument: document.querySelector('#new-document'),
   openDocument: document.querySelector('#open-document'),
   saveDocument: document.querySelector('#save-document'),
+  saveAsDocument: document.querySelector('#save-as-document'),
   undo: document.querySelector('#undo'),
   redo: document.querySelector('#redo'),
   copySelection: document.querySelector('#copy-selection'),
@@ -103,6 +104,7 @@ const actionButtons = [
   elements.newDocument,
   elements.openDocument,
   elements.saveDocument,
+  elements.saveAsDocument,
   elements.undo,
   elements.redo,
   elements.copySelection,
@@ -1445,18 +1447,21 @@ elements.appearanceStrokeEnabled.addEventListener('change', updateAppearanceEnab
 elements.appearanceFillEnabled.addEventListener('change', updateAppearanceEnabledState);
 
 
+function saveStatus(result, prefix = 'Saved') {
+  const mode = result.commitMode === 'replaced' ? 'replaced atomically' : 'created atomically';
+  return result.cleanupWarning
+    ? `${prefix} (${mode}); temporary cleanup warning`
+    : `${prefix} (${mode})`;
+}
+
 function saveCurrentDocument() {
-  void runAction(
-    'save_document',
-    undefined,
-    (result) => {
-      const mode = result.commitMode === 'replaced' ? 'replaced atomically' : 'created atomically';
-      return result.cleanupWarning
-        ? `Saved (${mode}); temporary cleanup warning`
-        : `Saved (${mode})`;
-    },
-    { syncRecovery: true },
-  );
+  void runAction('save_document', undefined, (result) => saveStatus(result), { syncRecovery: true });
+}
+
+function saveAsCurrentDocument() {
+  void runAction('save_as_document', undefined, (result) => saveStatus(result, 'Saved as'), {
+    syncRecovery: true,
+  });
 }
 
 function undoCurrentDocument() {
@@ -1474,6 +1479,7 @@ function redoCurrentDocument() {
 }
 
 elements.saveDocument.addEventListener('click', saveCurrentDocument);
+elements.saveAsDocument.addEventListener('click', saveAsCurrentDocument);
 
 elements.undo.addEventListener('click', undoCurrentDocument);
 
@@ -1543,6 +1549,8 @@ window.addEventListener(
         event.stopPropagation();
         if (shortcut === 'save') {
           saveCurrentDocument();
+        } else if (shortcut === 'save-as') {
+          saveAsCurrentDocument();
         } else if (shortcut === 'undo') {
           undoCurrentDocument();
         } else if (shortcut === 'redo') {

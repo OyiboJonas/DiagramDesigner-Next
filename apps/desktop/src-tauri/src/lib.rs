@@ -2,6 +2,7 @@ mod clipboard;
 mod grouping;
 mod legacy_import;
 mod renderer_benchmark_evidence;
+mod save_policy;
 
 use std::{
     fs,
@@ -33,7 +34,9 @@ use renderer_benchmark_evidence::{
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+use save_policy::SaveIntent;
 
 const UNTITLED_DOCUMENT_NAME: &str = "Untitled";
 const MAX_MOVE_ELEMENTS: usize = 100_000;
@@ -1849,6 +1852,22 @@ async fn save_document(
     app: AppHandle,
     state: State<'_, DesktopState>,
 ) -> Result<SaveResultDto, CommandError> {
+    save_document_with_intent(app, state, SaveIntent::Save).await
+}
+
+#[tauri::command]
+async fn save_as_document(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+) -> Result<SaveResultDto, CommandError> {
+    save_document_with_intent(app, state, SaveIntent::SaveAs).await
+}
+
+async fn save_document_with_intent(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    intent: SaveIntent,
+) -> Result<SaveResultDto, CommandError> {
     let (prepared, existing_path) = {
         let document = lock_document(&state)?;
         let prepared = document
@@ -1860,25 +1879,29 @@ async fn save_document(
         (prepared, document.path.clone())
     };
 
-    let first_save = existing_path.is_none();
-    let destination = if let Some(path) = existing_path {
-        path
+    let has_existing_path = existing_path.is_some();
+    let destination = if intent.uses_existing_path(has_existing_path) {
+        existing_path.clone().ok_or_else(|| {
+            CommandError::new(
+                "save_path_missing",
+                "The existing document save path is no longer available.",
+            )
+        })?
     } else {
+        let suggested_name = existing_path
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Untitled.ddnx".to_owned());
         let selected = app
             .dialog()
             .file()
             .add_filter("DiagramDesigner Next", &["ddnx"])
-            .set_file_name("Untitled.ddnx")
+            .set_file_name(&suggested_name)
             .blocking_save_file();
         let Some(selected) = selected else {
             let document = lock_document(&state)?;
-            return Ok(SaveResultDto {
-                cancelled: true,
-                state: document_state_dto(&document),
-                commit_mode: None,
-                durability: None,
-                cleanup_warning: None,
-            });
+            return Ok(cancelled_save_result(&document));
         };
         normalize_ddnx_save_path(
             selected
@@ -1887,14 +1910,24 @@ async fn save_document(
         )?
     };
 
-    // Overwrite confirmation remains application policy rather than a low-level
-    // filesystem-adapter flag. Until a dedicated confirmation flow exists, the
-    // first Save of a new document refuses an already-existing target.
-    if first_save && destination.exists() {
-        return Err(CommandError::new(
-            "save_target_exists",
-            "The selected file already exists. Overwrite confirmation is not implemented yet; choose a new file name.",
-        ));
+    if intent.requires_overwrite_confirmation(has_existing_path, destination.exists()) {
+        // This command is async, matching the existing native file-picker boundary;
+        // the blocking native dialog therefore does not execute in a synchronous
+        // main-thread Tauri command context.
+        let confirmed = app
+            .dialog()
+            .message(format!(
+                "{} already exists. Replace it with the current DiagramDesigner Next document?",
+                destination.display()
+            ))
+            .title("Replace existing DDNX file?")
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::YesNo)
+            .blocking_show();
+        if !confirmed {
+            let document = lock_document(&state)?;
+            return Ok(cancelled_save_result(&document));
+        }
     }
 
     let report = atomic_save(&destination, prepared.bytes()).map_err(map_atomic_save_error)?;
@@ -1906,7 +1939,7 @@ async fn save_document(
             "The file was written, but the document session was replaced before the save completed.",
         ));
     }
-    if first_save {
+    if intent.updates_persistent_path(has_existing_path) {
         document.path = Some(destination);
     }
     document.imported_dirty = false;
@@ -1927,6 +1960,16 @@ async fn save_document(
         }),
         cleanup_warning: report.cleanup_warning,
     })
+}
+
+fn cancelled_save_result(document: &DesktopDocument) -> SaveResultDto {
+    SaveResultDto {
+        cancelled: true,
+        state: document_state_dto(document),
+        commit_mode: None,
+        durability: None,
+        cleanup_warning: None,
+    }
 }
 
 #[tauri::command]
@@ -2764,6 +2807,7 @@ pub fn run() {
             new_document,
             open_document,
             save_document,
+            save_as_document,
             recovery_status,
             restore_recovery,
             discard_recovery,
