@@ -78,7 +78,6 @@ fn roots(app: &ApplicationSession) -> Vec<ElementId> {
         .clone()
 }
 
-
 #[test]
 fn structural_group_z_order_round_trips_without_changing_children() {
     let (artifact, ids) = fixture();
