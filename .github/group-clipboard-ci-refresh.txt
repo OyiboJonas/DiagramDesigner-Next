@@ -1,1 +1,0 @@
-Temporary CI head refresh after rustfmt. This file is removed in the next commit.
