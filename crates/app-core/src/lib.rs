@@ -7,7 +7,7 @@ use editor_core::{
     ConnectorEndpointSnapshot as CoreConnectorEndpointSnapshot,
     ConnectorGeometryKind as CoreConnectorGeometryKind, EditCommand, EditTransaction, EditorError,
     EditorSession, HistoryStateId, LayerScope, LayerTarget,
-    ResolvedPortPosition as CoreResolvedPortPosition,
+    ResolvedPortPosition as CoreResolvedPortPosition, ZOrderOperation as CoreZOrderOperation,
 };
 use editor_runtime::{EditorRuntime, RecoveryCheckpointKey, RecoveryPlan};
 use next_domain::{
@@ -38,6 +38,25 @@ pub enum ConnectorGeometryKind {
     Straight,
     Orthogonal,
     Curve,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZOrderOperation {
+    BringToFront,
+    SendToBack,
+    BringForward,
+    SendBackward,
+}
+
+impl From<ZOrderOperation> for CoreZOrderOperation {
+    fn from(value: ZOrderOperation) -> Self {
+        match value {
+            ZOrderOperation::BringToFront => Self::BringToFront,
+            ZOrderOperation::SendToBack => Self::SendToBack,
+            ZOrderOperation::BringForward => Self::BringForward,
+            ZOrderOperation::SendBackward => Self::SendBackward,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -256,6 +275,18 @@ impl ApplicationSession {
         self.execute_edit(EditCommand::MoveElements {
             element_ids,
             delta_mm,
+        })
+    }
+
+    /// Reorder top-level elements through editor-core's canonical scene-root order.
+    pub fn reorder_elements(
+        &mut self,
+        element_ids: Vec<ElementId>,
+        operation: ZOrderOperation,
+    ) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::ReorderElements {
+            element_ids,
+            operation: operation.into(),
         })
     }
 

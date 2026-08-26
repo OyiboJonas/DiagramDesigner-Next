@@ -13,7 +13,7 @@ use app_core::{
     ApplicationSession, ConnectorEndpointSide as AppConnectorEndpointSide,
     ConnectorEndpointState as AppConnectorEndpointState,
     ConnectorEndpoints as AppConnectorEndpoints, ConnectorGeometryKind as AppConnectorGeometryKind,
-    ElementAppearanceUpdate,
+    ElementAppearanceUpdate, ZOrderOperation as AppZOrderOperation,
 };
 use ddnx::PackageLimits;
 use editor_runtime::RecoveryPlan;
@@ -236,6 +236,21 @@ struct SelectionRequest {
 struct MoveElementsRequest {
     element_ids: Vec<ElementId>,
     delta_mm: Point,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum ZOrderOperationRequest {
+    BringToFront,
+    SendToBack,
+    BringForward,
+    SendBackward,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReorderSelectionRequest {
+    operation: ZOrderOperationRequest,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1176,6 +1191,94 @@ fn delete_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultD
             .map_err(|error| CommandError::new("element_delete_failed", error.to_string()))?;
         document.session.clear_selection();
     }
+    Ok(element_edit_result_dto(&document))
+}
+
+#[tauri::command]
+fn reorder_selection(
+    request: ReorderSelectionRequest,
+    state: State<'_, DesktopState>,
+) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let selected: Vec<_> = document
+        .session
+        .session()
+        .selection()
+        .iter()
+        .copied()
+        .collect();
+    if selected.is_empty() {
+        return Ok(element_edit_result_dto(&document));
+    }
+
+    {
+        let session = document.session.session();
+        let page_id = session.active_page_id().ok_or_else(|| {
+            CommandError::new(
+                "arrange_no_active_page",
+                "Choose an active page before arranging elements.",
+            )
+        })?;
+        let layer_id = document.session.active_page_layer_id().ok_or_else(|| {
+            CommandError::new(
+                "arrange_no_active_layer",
+                "Choose a page-local layer before arranging elements.",
+            )
+        })?;
+        let page = session
+            .document()
+            .pages
+            .iter()
+            .find(|page| page.id == page_id)
+            .ok_or_else(|| {
+                CommandError::new("arrange_page_missing", "The active page no longer exists.")
+            })?;
+        let layer = page
+            .layers
+            .iter()
+            .find(|layer| layer.id == layer_id)
+            .ok_or_else(|| {
+                CommandError::new(
+                    "arrange_layer_missing",
+                    "The active layer no longer exists.",
+                )
+            })?;
+        if !layer.visible {
+            return Err(CommandError::new(
+                "arrange_layer_hidden",
+                "Elements can be arranged only on a visible active layer.",
+            ));
+        }
+        if layer.locked {
+            return Err(CommandError::new(
+                "arrange_layer_locked",
+                "Unlock the active layer before arranging elements.",
+            ));
+        }
+        if selected.iter().any(|element_id| {
+            !layer
+                .scene
+                .elements
+                .iter()
+                .any(|element| element.id == *element_id)
+        }) {
+            return Err(CommandError::new(
+                "arrange_not_on_active_layer",
+                "Every selected element must belong to the active layer.",
+            ));
+        }
+    }
+
+    let operation = match request.operation {
+        ZOrderOperationRequest::BringToFront => AppZOrderOperation::BringToFront,
+        ZOrderOperationRequest::SendToBack => AppZOrderOperation::SendToBack,
+        ZOrderOperationRequest::BringForward => AppZOrderOperation::BringForward,
+        ZOrderOperationRequest::SendBackward => AppZOrderOperation::SendBackward,
+    };
+    document
+        .session
+        .reorder_elements(selected, operation)
+        .map_err(|error| CommandError::new("arrange_failed", error.to_string()))?;
     Ok(element_edit_result_dto(&document))
 }
 
@@ -2510,6 +2613,7 @@ pub fn run() {
             candidate_page_presentation,
             set_selection,
             selection_properties,
+            reorder_selection,
             copy_selection,
             paste_selection,
             duplicate_selection,
