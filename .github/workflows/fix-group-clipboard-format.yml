@@ -1,0 +1,33 @@
+name: Format group clipboard hardening
+
+on:
+  push:
+    branches: [desktop-group-clipboard]
+    paths:
+      - '.github/workflows/fix-group-clipboard-format.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Format desktop Rust
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Verify desktop Rust format
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+      - name: Commit format fix and remove helper
+        run: |
+          git rm .github/workflows/fix-group-clipboard-format.yml
+          git add apps/desktop/src-tauri/src/clipboard.rs
+          git diff --cached --quiet && { echo 'No formatting changes staged'; exit 1; }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Style: format group clipboard scope checks'
+          git push
