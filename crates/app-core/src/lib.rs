@@ -11,8 +11,8 @@ use editor_core::{
 };
 use editor_runtime::{EditorRuntime, RecoveryCheckpointKey, RecoveryPlan};
 use next_domain::{
-    Color, Connection, Element, ElementId, FillStyle, Layer, LayerId, NextArtifact, Page, PageId,
-    Point, PortId, Rect, Size, StrokeStyle, TextBlock,
+    Color, Connection, Element, ElementId, ElementKind, FillStyle, Layer, LayerId, NextArtifact,
+    Page, PageId, Point, PortId, Rect, Size, StrokeStyle, TextBlock,
 };
 use thiserror::Error;
 
@@ -85,6 +85,12 @@ pub struct ElementAppearanceUpdate {
     pub stroke: Option<StrokeStyle>,
     pub fill: Option<FillStyle>,
     pub text_color: Option<Color>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructuralGroupCreation {
+    pub element: Element,
+    pub z_index: Option<usize>,
 }
 
 impl From<CoreConnectorEndpointSnapshot> for ConnectorEndpoints {
@@ -334,6 +340,18 @@ impl ApplicationSession {
         elements: Vec<Element>,
         appearance_updates: Vec<ElementAppearanceUpdate>,
     ) -> Result<bool, ApplicationError> {
+        self.create_elements_with_groups(target, elements, Vec::new(), appearance_updates)
+    }
+
+    /// Create clipboard leaves, rebuild structural groups from inner to outer and
+    /// materialize dedicated appearance snapshots as one semantic history step.
+    pub fn create_elements_with_groups(
+        &mut self,
+        target: LayerTarget,
+        elements: Vec<Element>,
+        groups: Vec<StructuralGroupCreation>,
+        appearance_updates: Vec<ElementAppearanceUpdate>,
+    ) -> Result<bool, ApplicationError> {
         let mut transaction =
             EditTransaction::new(
                 elements
@@ -344,6 +362,17 @@ impl ApplicationSession {
                         z_index: None,
                     }),
             );
+        let (mut empty_groups, non_empty_groups): (Vec<_>, Vec<_>) = groups
+            .into_iter()
+            .partition(|group| matches!(&group.element.kind, ElementKind::Group { children } if children.is_empty()));
+        empty_groups.sort_by_key(|group| group.z_index.unwrap_or(usize::MAX));
+        for group in empty_groups.into_iter().chain(non_empty_groups) {
+            transaction.push(EditCommand::CreateStructuralGroup {
+                target,
+                group: group.element,
+                z_index: group.z_index,
+            });
+        }
         for update in appearance_updates {
             transaction.push(EditCommand::SetElementAppearance {
                 element_id: update.element_id,

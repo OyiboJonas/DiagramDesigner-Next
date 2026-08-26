@@ -4,6 +4,7 @@ import { buildRulerTicks } from './editor-interaction/snapping.mjs';
 import { isTextEditingTarget, resolveApplicationShortcut } from './editor-interaction/app-shortcuts.mjs';
 import { createZOrderRequest, isZOrderActionEnabled } from './editor-interaction/z-order-actions.mjs';
 import { isGroupActionEnabled, isUngroupActionEnabled } from './editor-interaction/group-actions.mjs';
+import { isClipboardSelectionActionEnabled } from './editor-interaction/clipboard-actions.mjs';
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -191,20 +192,15 @@ function setBusy(busy) {
 
 function updateClipboardActionState() {
   const selectionCount = Number(currentSelectionProperties?.count ?? 0);
-  const containsGroup = currentSelectionProperties?.containsGroup === true;
-  elements.copySelection.disabled = isBusy || selectionCount === 0 || containsGroup;
-  elements.duplicateSelection.disabled = isBusy || selectionCount === 0 || containsGroup;
+  const selectionEnabled = isClipboardSelectionActionEnabled({
+    selectionCount,
+    busy: isBusy,
+  });
+  elements.copySelection.disabled = !selectionEnabled;
+  elements.duplicateSelection.disabled = !selectionEnabled;
   elements.pasteSelection.disabled = isBusy || !clipboardAvailable;
-  const groupReason = containsGroup
-    ? 'Structural groups are not copied or duplicated in this slice; ungroup first'
-    : null;
-  if (groupReason) {
-    elements.copySelection.title = groupReason;
-    elements.duplicateSelection.title = groupReason;
-  } else {
-    elements.copySelection.title = 'Copy the current selection (Ctrl/Cmd+C)';
-    elements.duplicateSelection.title = 'Duplicate the current selection (Ctrl/Cmd+D)';
-  }
+  elements.copySelection.title = 'Copy the current selection (Ctrl/Cmd+C)';
+  elements.duplicateSelection.title = 'Duplicate the current selection (Ctrl/Cmd+D)';
 }
 
 function activeLayerForZOrder() {
