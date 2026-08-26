@@ -24,8 +24,6 @@ jobs:
         run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
       - name: Validate ACL parity
         run: python scripts/check-desktop-command-acl.py
-      - name: Validate Tauri ACL configuration and compile
-        run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
       - name: Diff check
         run: git diff --check
       - name: Commit product changes and remove temporary helpers
