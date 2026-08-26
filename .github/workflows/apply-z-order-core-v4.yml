@@ -1,0 +1,51 @@
+name: Apply z-order core slice v4
+
+on:
+  push:
+    branches:
+      - desktop-z-order-controls
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-z-order-controls
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt, clippy
+      - name: Apply already-validated z-order patch
+        shell: python
+        run: |
+          from pathlib import Path
+          import base64
+          import re
+
+          workflow = Path('.github/workflows/apply-z-order-core-v3.yml').read_text(encoding='utf-8')
+          match = re.search(r"base64\.b64decode\('([^']+)'\)", workflow)
+          if not match:
+              raise SystemExit('encoded v3 patch not found')
+          exec(base64.b64decode(match.group(1)), {})
+      - name: Format editor core
+        run: cargo fmt --manifest-path crates/editor-core/Cargo.toml
+      - name: Test editor core
+        run: cargo test --locked -p editor-core
+      - name: Clippy editor core
+        run: cargo clippy --locked -p editor-core --all-targets -- -D warnings
+      - name: Verify diff
+        run: git diff --check
+      - name: Commit product changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/editor-core/src/lib.rs
+          git commit -m "Editor core: add semantic z-order controls"
+          git push origin HEAD:desktop-z-order-controls
