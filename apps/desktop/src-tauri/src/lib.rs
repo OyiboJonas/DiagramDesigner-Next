@@ -70,8 +70,16 @@ impl DesktopDocument {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ClipboardAppearanceSnapshot {
+    stroke: Option<StrokeStyle>,
+    fill: Option<FillStyle>,
+    text_color: Option<Color>,
+}
+
 struct DesktopClipboard {
     payload: clipboard::ClipboardPayload,
+    appearance: std::collections::BTreeMap<ElementId, ClipboardAppearanceSnapshot>,
     paste_count: u32,
 }
 
@@ -1184,6 +1192,8 @@ fn copy_selection(state: State<'_, DesktopState>) -> Result<ClipboardCopyDto, Co
     let payload = clipboard::capture_selection(document.session.session().document(), &selected)
         .map_err(|error| CommandError::new("clipboard_copy_failed", error.to_string()))?;
     let count = payload.len();
+    let appearance =
+        capture_clipboard_appearance(document.session.session().document(), &selected)?;
     let mut application_clipboard = state.clipboard.lock().map_err(|_| {
         CommandError::new(
             "clipboard_lock_failed",
@@ -1192,6 +1202,7 @@ fn copy_selection(state: State<'_, DesktopState>) -> Result<ClipboardCopyDto, Co
     })?;
     *application_clipboard = Some(DesktopClipboard {
         payload,
+        appearance,
         paste_count: 0,
     });
     Ok(ClipboardCopyDto { count })
@@ -1218,10 +1229,8 @@ fn paste_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultDt
     let next_step = clipboard.paste_count.saturating_add(1).max(1);
     let mut instantiated = clipboard.payload.instantiate(next_step);
     let selected = instantiated.element_ids.clone();
-    let appearance_updates = prepare_clipboard_appearance_updates(
-        document.session.session().document(),
-        &mut instantiated,
-    )?;
+    let appearance_updates =
+        prepare_clipboard_appearance_updates(&clipboard.appearance, &mut instantiated)?;
     document
         .session
         .create_elements(target, instantiated.elements, appearance_updates)
@@ -1254,12 +1263,11 @@ fn duplicate_selection(
         .collect();
     let payload = clipboard::capture_selection(document.session.session().document(), &selected)
         .map_err(|error| CommandError::new("duplicate_failed", error.to_string()))?;
+    let appearance =
+        capture_clipboard_appearance(document.session.session().document(), &selected)?;
     let mut instantiated = payload.instantiate(1);
     let duplicated_ids = instantiated.element_ids.clone();
-    let appearance_updates = prepare_clipboard_appearance_updates(
-        document.session.session().document(),
-        &mut instantiated,
-    )?;
+    let appearance_updates = prepare_clipboard_appearance_updates(&appearance, &mut instantiated)?;
     document
         .session
         .create_elements(target, instantiated.elements, appearance_updates)
@@ -1282,14 +1290,14 @@ fn clear_application_clipboard(state: &State<'_, DesktopState>) -> Result<(), Co
     Ok(())
 }
 
-fn prepare_clipboard_appearance_updates(
+fn capture_clipboard_appearance(
     document: &Document,
-    instantiated: &mut clipboard::ClipboardInstantiation,
-) -> Result<Vec<ElementAppearanceUpdate>, CommandError> {
+    selected: &[ElementId],
+) -> Result<std::collections::BTreeMap<ElementId, ClipboardAppearanceSnapshot>, CommandError> {
     const APPEARANCE_STYLE_NAMESPACE: &str = "diagramdesigner-next:element-appearance";
-    let mut updates = Vec::new();
+    let mut snapshots = std::collections::BTreeMap::new();
 
-    for (source_id, copied_id) in &instantiated.source_element_ids {
+    for source_id in selected {
         let source = find_element(document, *source_id).ok_or_else(|| {
             CommandError::new(
                 "clipboard_source_missing",
@@ -1310,6 +1318,29 @@ fn prepare_clipboard_appearance_updates(
                     "The copied element's dedicated appearance style is missing.",
                 )
             })?;
+        snapshots.insert(
+            *source_id,
+            ClipboardAppearanceSnapshot {
+                stroke: style.stroke.clone(),
+                fill: style.fill.clone(),
+                text_color: style.text_color,
+            },
+        );
+    }
+
+    Ok(snapshots)
+}
+
+fn prepare_clipboard_appearance_updates(
+    snapshots: &std::collections::BTreeMap<ElementId, ClipboardAppearanceSnapshot>,
+    instantiated: &mut clipboard::ClipboardInstantiation,
+) -> Result<Vec<ElementAppearanceUpdate>, CommandError> {
+    let mut updates = Vec::new();
+
+    for (source_id, copied_id) in &instantiated.source_element_ids {
+        let Some(style) = snapshots.get(source_id) else {
+            continue;
+        };
         let copied = instantiated
             .elements
             .iter_mut()
@@ -1321,10 +1352,6 @@ fn prepare_clipboard_appearance_updates(
                 )
             })?;
 
-        // A dedicated appearance style is element-owned. Do not share the source
-        // element's deterministic style ID with the copy: create the copied element
-        // unstyled first, then materialize an equivalent dedicated style in the same
-        // editor transaction under the copied element's own deterministic ID.
         copied.style_id = None;
         updates.push(ElementAppearanceUpdate {
             element_id: *copied_id,
