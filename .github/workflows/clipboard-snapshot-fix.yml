@@ -26,170 +26,161 @@ jobs:
           path = Path('apps/desktop/src-tauri/src/lib.rs')
           s = path.read_text(encoding='utf-8')
 
-          def replace_once(old, new):
+          def sub_once(pattern, replacement, label, flags=0):
               global s
-              if old not in s:
-                  raise SystemExit(f'missing replacement target:\n{old[:160]}')
-              s = s.replace(old, new, 1)
+              s, count = re.subn(pattern, replacement, s, count=1, flags=flags)
+              if count != 1:
+                  raise SystemExit(f'{label}: replacement count {count}')
 
-          replace_once(
-              '''struct DesktopClipboard {
-                  payload: clipboard::ClipboardPayload,
-                  paste_count: u32,
-              }''',
+          sub_once(
+              r'struct DesktopClipboard \{\s*payload: clipboard::ClipboardPayload,\s*paste_count: u32,\s*\}',
               '''#[derive(Debug, Clone)]
-              struct ClipboardAppearanceSnapshot {
-                  stroke: Option<StrokeStyle>,
-                  fill: Option<FillStyle>,
-                  text_color: Option<Color>,
-              }
+struct ClipboardAppearanceSnapshot {
+    stroke: Option<StrokeStyle>,
+    fill: Option<FillStyle>,
+    text_color: Option<Color>,
+}
 
-              struct DesktopClipboard {
-                  payload: clipboard::ClipboardPayload,
-                  appearance: std::collections::BTreeMap<ElementId, ClipboardAppearanceSnapshot>,
-                  paste_count: u32,
-              }''',
+struct DesktopClipboard {
+    payload: clipboard::ClipboardPayload,
+    appearance: std::collections::BTreeMap<ElementId, ClipboardAppearanceSnapshot>,
+    paste_count: u32,
+}''',
+              'clipboard struct',
           )
 
-          replace_once(
-              '''    let count = payload.len();
-                  let mut application_clipboard = state.clipboard.lock().map_err(|_| {''',
-              '''    let count = payload.len();
-                  let appearance = capture_clipboard_appearance(
-                      document.session.session().document(),
-                      &selected,
-                  )?;
-                  let mut application_clipboard = state.clipboard.lock().map_err(|_| {''',
+          sub_once(
+              r'(let count = payload\.len\(\);)\s*(let mut application_clipboard = state\.clipboard\.lock\(\)\.map_err)',
+              r'''\1
+    let appearance = capture_clipboard_appearance(
+        document.session.session().document(),
+        &selected,
+    )?;
+    \2''',
+              'copy snapshot capture',
           )
 
-          replace_once(
-              '''    *application_clipboard = Some(DesktopClipboard {
-                  payload,
-                  paste_count: 0,
-              });''',
-              '''    *application_clipboard = Some(DesktopClipboard {
-                  payload,
-                  appearance,
-                  paste_count: 0,
-              });''',
+          sub_once(
+              r'(\*application_clipboard = Some\(DesktopClipboard \{\s*payload,)\s*(paste_count: 0,)',
+              r'''\1
+        appearance,
+        \2''',
+              'clipboard snapshot storage',
           )
 
-          replace_once(
-              '''    let appearance_updates = prepare_clipboard_appearance_updates(
-                  document.session.session().document(),
-                  &mut instantiated,
-              )?;''',
-              '''    let appearance_updates =
-                  prepare_clipboard_appearance_updates(&clipboard.appearance, &mut instantiated)?;''',
+          old_prepare_call = (
+              r'let appearance_updates = prepare_clipboard_appearance_updates\(\s*'
+              r'document\.session\.session\(\)\.document\(\),\s*'
+              r'&mut instantiated,\s*\)\?;'
+          )
+          sub_once(
+              old_prepare_call,
+              'let appearance_updates =\n        prepare_clipboard_appearance_updates(&clipboard.appearance, &mut instantiated)?;',
+              'paste snapshot use',
           )
 
-          replace_once(
-              '''    let payload = clipboard::capture_selection(document.session.session().document(), &selected)
-                  .map_err(|error| CommandError::new("duplicate_failed", error.to_string()))?;
-              let mut instantiated = payload.instantiate(1);''',
-              '''    let payload = clipboard::capture_selection(document.session.session().document(), &selected)
-                  .map_err(|error| CommandError::new("duplicate_failed", error.to_string()))?;
-              let appearance = capture_clipboard_appearance(
-                  document.session.session().document(),
-                  &selected,
-              )?;
-              let mut instantiated = payload.instantiate(1);''',
+          sub_once(
+              r'(let payload = clipboard::capture_selection\(document\.session\.session\(\)\.document\(\), &selected\)\s*'
+              r'\.map_err\(\|error\| CommandError::new\("duplicate_failed", error\.to_string\(\)\)\)\?;)\s*'
+              r'(let mut instantiated = payload\.instantiate\(1\);)',
+              r'''\1
+    let appearance = capture_clipboard_appearance(
+        document.session.session().document(),
+        &selected,
+    )?;
+    \2''',
+              'duplicate snapshot capture',
           )
 
-          replace_once(
-              '''    let appearance_updates = prepare_clipboard_appearance_updates(
-                  document.session.session().document(),
-                  &mut instantiated,
-              )?;''',
-              '''    let appearance_updates =
-                  prepare_clipboard_appearance_updates(&appearance, &mut instantiated)?;''',
+          sub_once(
+              old_prepare_call,
+              'let appearance_updates =\n        prepare_clipboard_appearance_updates(&appearance, &mut instantiated)?;',
+              'duplicate snapshot use',
           )
 
-          pattern = re.compile(
-              r'''fn prepare_clipboard_appearance_updates\(\n    document: &Document,\n    instantiated: &mut clipboard::ClipboardInstantiation,\n\) -> Result<Vec<ElementAppearanceUpdate>, CommandError> \{.*?\n\}\n\n(?=#\[tauri::command\]\nfn update_element_properties)''',
-              re.S,
+          helper_pattern = (
+              r'fn prepare_clipboard_appearance_updates\(\s*'
+              r'document: &Document,\s*'
+              r'instantiated: &mut clipboard::ClipboardInstantiation,\s*'
+              r'\) -> Result<Vec<ElementAppearanceUpdate>, CommandError> \{.*?'
+              r'\n\}\n\n(?=#\[tauri::command\]\nfn update_element_properties)'
           )
-          replacement = '''fn capture_clipboard_appearance(
-                  document: &Document,
-                  selected: &[ElementId],
-              ) -> Result<
-                  std::collections::BTreeMap<ElementId, ClipboardAppearanceSnapshot>,
-                  CommandError,
-              > {
-                  const APPEARANCE_STYLE_NAMESPACE: &str = "diagramdesigner-next:element-appearance";
-                  let mut snapshots = std::collections::BTreeMap::new();
+          helper_replacement = '''fn capture_clipboard_appearance(
+    document: &Document,
+    selected: &[ElementId],
+) -> Result<std::collections::BTreeMap<ElementId, ClipboardAppearanceSnapshot>, CommandError> {
+    const APPEARANCE_STYLE_NAMESPACE: &str = "diagramdesigner-next:element-appearance";
+    let mut snapshots = std::collections::BTreeMap::new();
 
-                  for source_id in selected {
-                      let source = find_element(document, *source_id).ok_or_else(|| {
-                          CommandError::new(
-                              "clipboard_source_missing",
-                              "A copied source element no longer exists in the current document.",
-                          )
-                      })?;
-                      let dedicated_style_id = StyleId::v5(source_id.0, APPEARANCE_STYLE_NAMESPACE);
-                      if source.style_id != Some(dedicated_style_id) {
-                          continue;
-                      }
-                      let style = document
-                          .styles
-                          .iter()
-                          .find(|style| style.id == dedicated_style_id)
-                          .ok_or_else(|| {
-                              CommandError::new(
-                                  "clipboard_appearance_missing",
-                                  "The copied element's dedicated appearance style is missing.",
-                              )
-                          })?;
-                      snapshots.insert(
-                          *source_id,
-                          ClipboardAppearanceSnapshot {
-                              stroke: style.stroke.clone(),
-                              fill: style.fill.clone(),
-                              text_color: style.text_color,
-                          },
-                      );
-                  }
+    for source_id in selected {
+        let source = find_element(document, *source_id).ok_or_else(|| {
+            CommandError::new(
+                "clipboard_source_missing",
+                "A copied source element no longer exists in the current document.",
+            )
+        })?;
+        let dedicated_style_id = StyleId::v5(source_id.0, APPEARANCE_STYLE_NAMESPACE);
+        if source.style_id != Some(dedicated_style_id) {
+            continue;
+        }
+        let style = document
+            .styles
+            .iter()
+            .find(|style| style.id == dedicated_style_id)
+            .ok_or_else(|| {
+                CommandError::new(
+                    "clipboard_appearance_missing",
+                    "The copied element's dedicated appearance style is missing.",
+                )
+            })?;
+        snapshots.insert(
+            *source_id,
+            ClipboardAppearanceSnapshot {
+                stroke: style.stroke.clone(),
+                fill: style.fill.clone(),
+                text_color: style.text_color,
+            },
+        );
+    }
 
-                  Ok(snapshots)
-              }
+    Ok(snapshots)
+}
 
-              fn prepare_clipboard_appearance_updates(
-                  snapshots: &std::collections::BTreeMap<ElementId, ClipboardAppearanceSnapshot>,
-                  instantiated: &mut clipboard::ClipboardInstantiation,
-              ) -> Result<Vec<ElementAppearanceUpdate>, CommandError> {
-                  let mut updates = Vec::new();
+fn prepare_clipboard_appearance_updates(
+    snapshots: &std::collections::BTreeMap<ElementId, ClipboardAppearanceSnapshot>,
+    instantiated: &mut clipboard::ClipboardInstantiation,
+) -> Result<Vec<ElementAppearanceUpdate>, CommandError> {
+    let mut updates = Vec::new();
 
-                  for (source_id, copied_id) in &instantiated.source_element_ids {
-                      let Some(style) = snapshots.get(source_id) else {
-                          continue;
-                      };
-                      let copied = instantiated
-                          .elements
-                          .iter_mut()
-                          .find(|element| element.id == *copied_id)
-                          .ok_or_else(|| {
-                              CommandError::new(
-                                  "clipboard_copy_missing",
-                                  "The instantiated clipboard element could not be resolved.",
-                              )
-                          })?;
+    for (source_id, copied_id) in &instantiated.source_element_ids {
+        let Some(style) = snapshots.get(source_id) else {
+            continue;
+        };
+        let copied = instantiated
+            .elements
+            .iter_mut()
+            .find(|element| element.id == *copied_id)
+            .ok_or_else(|| {
+                CommandError::new(
+                    "clipboard_copy_missing",
+                    "The instantiated clipboard element could not be resolved.",
+                )
+            })?;
 
-                      copied.style_id = None;
-                      updates.push(ElementAppearanceUpdate {
-                          element_id: *copied_id,
-                          stroke: style.stroke.clone(),
-                          fill: style.fill.clone(),
-                          text_color: style.text_color,
-                      });
-                  }
+        copied.style_id = None;
+        updates.push(ElementAppearanceUpdate {
+            element_id: *copied_id,
+            stroke: style.stroke.clone(),
+            fill: style.fill.clone(),
+            text_color: style.text_color,
+        });
+    }
 
-                  Ok(updates)
-              }
+    Ok(updates)
+}
 
-              '''
-          s, count = pattern.subn(replacement, s, count=1)
-          if count != 1:
-              raise SystemExit(f'prepare helper replacement count: {count}')
+'''
+          sub_once(helper_pattern, helper_replacement, 'snapshot helper', flags=re.S)
 
           path.write_text(s, encoding='utf-8')
       - name: Format desktop Rust
