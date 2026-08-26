@@ -1,0 +1,67 @@
+name: Apply group-aware clipboard implementation
+
+on:
+  push:
+    branches: [desktop-group-clipboard]
+    paths:
+      - '.github/workflows/apply-group-clipboard.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt, clippy
+      - name: Apply product patch
+        run: python .github/scripts/apply-group-clipboard.py
+      - name: Format touched Rust
+        run: |
+          cargo fmt --all
+          cargo fmt --manifest-path crates/app-core/Cargo.toml
+          cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Application core tests
+        run: cargo test --manifest-path crates/app-core/Cargo.toml
+      - name: Application core Clippy
+        run: cargo clippy --manifest-path crates/app-core/Cargo.toml --all-targets -- -D warnings
+      - name: Desktop JavaScript syntax
+        run: node --check apps/desktop/ui/app.js
+      - name: Frontend interaction tests
+        run: node --test web/editor-interaction/*.test.mjs
+      - name: Diff check
+        run: git diff --check
+      - name: Commit product implementation
+        run: |
+          git add \
+            apps/desktop/src-tauri/src/clipboard.rs \
+            apps/desktop/src-tauri/src/lib.rs \
+            apps/desktop/ui/app.js \
+            apps/desktop/ui/editor-interaction/clipboard-actions.mjs \
+            crates/app-core/src/lib.rs \
+            crates/app-core/tests/group_clipboard_transaction.rs \
+            web/editor-interaction/clipboard-actions.mjs \
+            web/editor-interaction/clipboard-actions.test.mjs
+          git diff --cached --quiet && { echo 'No product changes staged'; exit 1; }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Editor: support structural groups in clipboard workflows'
+          git push
+
+  windows-tauri:
+    needs: apply
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-group-clipboard
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt, clippy
+      - name: Tauri desktop library tests
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
