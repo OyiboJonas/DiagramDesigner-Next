@@ -160,6 +160,68 @@
               <button id="apply-properties" class="primary" type="submit">Apply properties</button>
             </form>
 
+            <form id="connector-style-form" class="appearance-form" hidden>
+              <div class="appearance-heading">
+                <h3>Connector</h3>
+                <span>line & markers</span>
+              </div>
+              <div class="appearance-section">
+                <label class="property-field">Start marker
+                  <select id="connector-start-marker">
+                  <option value="none">None</option>
+                  <option value="stop">Stop</option>
+                  <option value="circle">Circle</option>
+                  <option value="ball">Ball</option>
+                  <option value="diamond">Diamond</option>
+                  <option value="arrow1">Arrow · open</option>
+                  <option value="arrow2">Arrow · filled</option>
+                  <option value="arrow3">Arrow · concave</option>
+                  <option value="double_arrow">Double arrow</option>
+                  <option value="uml_is_a">UML Is-A</option>
+                  <option value="uml_has_a">UML Has-A</option>
+                  <option value="many">Many / crow's foot</option>
+                  </select>
+                </label>
+                <label class="property-field">End marker
+                  <select id="connector-end-marker">
+                  <option value="none">None</option>
+                  <option value="stop">Stop</option>
+                  <option value="circle">Circle</option>
+                  <option value="ball">Ball</option>
+                  <option value="diamond">Diamond</option>
+                  <option value="arrow1">Arrow · open</option>
+                  <option value="arrow2">Arrow · filled</option>
+                  <option value="arrow3">Arrow · concave</option>
+                  <option value="double_arrow">Double arrow</option>
+                  <option value="uml_is_a">UML Is-A</option>
+                  <option value="uml_has_a">UML Has-A</option>
+                  <option value="many">Many / crow's foot</option>
+                  </select>
+                </label>
+                <label class="property-field">Line style
+                  <select id="connector-line-style">
+                  <option value="solid">Solid</option>
+                  <option value="dotted1">Dotted 1</option>
+                  <option value="dotted2">Dotted 2</option>
+                  <option value="short1">Short 1</option>
+                  <option value="short2">Short 2</option>
+                  <option value="long1">Long 1</option>
+                  <option value="long2">Long 2</option>
+                  <option value="dash_dot1">Dash-dot 1</option>
+                  <option value="dash_dot2">Dash-dot 2</option>
+                  <option value="dash_dash">Dash-dash</option>
+                  <option value="outline">Outline</option>
+                  </select>
+                </label>
+              </div>
+              <div id="connector-secondary-section" class="appearance-section" hidden>
+                <label class="appearance-toggle"><input id="connector-secondary-enabled" type="checkbox" /> Secondary color</label>
+                <label class="appearance-color-field">Color <input id="connector-secondary-color" type="color" value="#ffffff" /></label>
+                <p id="connector-secondary-note" class="property-note"></p>
+              </div>
+              <button id="apply-connector-style" type="submit">Apply connector style</button>
+            </form>
+
             <form id="selection-appearance-form" class="appearance-form" hidden>
               <div class="appearance-heading">
                 <h3>Appearance</h3>

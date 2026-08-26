@@ -28,6 +28,7 @@
     "allow-create-basic-element",
     "allow-create-connector",
     "allow-set-connector-endpoint",
+    "allow-update-connector-style",
     "allow-delete-selection",
     "allow-update-element-properties",
     "allow-update-element-appearance",

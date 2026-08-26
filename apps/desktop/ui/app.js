@@ -5,6 +5,13 @@ import { isTextEditingTarget, resolveApplicationShortcut } from './editor-intera
 import { createZOrderRequest, isZOrderActionEnabled } from './editor-interaction/z-order-actions.mjs';
 import { isGroupActionEnabled, isUngroupActionEnabled } from './editor-interaction/group-actions.mjs';
 import { isClipboardSelectionActionEnabled, isClipboardShortcutActionEnabled } from './editor-interaction/clipboard-actions.mjs';
+import {
+  buildConnectorStyleRequest,
+  connectorColorHex,
+  connectorEnumChoice,
+  connectorStyleEquals,
+  connectorUsesSecondary,
+} from './editor-interaction/connector-style-actions.mjs';
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -72,6 +79,15 @@ const elements = {
   propertyText: document.querySelector('#property-text'),
   propertyTextNote: document.querySelector('#property-text-note'),
   applyProperties: document.querySelector('#apply-properties'),
+  connectorStyleForm: document.querySelector('#connector-style-form'),
+  connectorStartMarker: document.querySelector('#connector-start-marker'),
+  connectorEndMarker: document.querySelector('#connector-end-marker'),
+  connectorLineStyle: document.querySelector('#connector-line-style'),
+  connectorSecondarySection: document.querySelector('#connector-secondary-section'),
+  connectorSecondaryEnabled: document.querySelector('#connector-secondary-enabled'),
+  connectorSecondaryColor: document.querySelector('#connector-secondary-color'),
+  connectorSecondaryNote: document.querySelector('#connector-secondary-note'),
+  applyConnectorStyle: document.querySelector('#apply-connector-style'),
   appearanceForm: document.querySelector('#selection-appearance-form'),
   appearanceStrokeSection: document.querySelector('#appearance-stroke-section'),
   appearanceStrokeEnabled: document.querySelector('#appearance-stroke-enabled'),
@@ -119,6 +135,7 @@ const actionButtons = [
   elements.drawOrthogonalConnector,
   elements.deleteSelection,
   elements.applyProperties,
+  elements.applyConnectorStyle,
   elements.applyAppearance,
   elements.addPage,
   elements.deletePage,
@@ -142,6 +159,7 @@ let currentPresentation = null;
 let currentSelectionProperties = null;
 let currentNavigation = null;
 let appearanceBaseline = null;
+let connectorStyleBaseline = null;
 let connectorTool = null;
 let isBusy = false;
 let clipboardAvailable = false;
@@ -187,6 +205,7 @@ function setBusy(busy) {
     updateClipboardActionState();
     elements.applyProperties.disabled =
       !primary || (primary.geometryEditable === false && primary.textEditable !== true);
+    elements.applyConnectorStyle.disabled = !primary?.connector;
     elements.applyAppearance.disabled = !primary?.appearance;
     updateStructureDisabledState();
   }
@@ -549,7 +568,9 @@ function renderSelectionProperties(details) {
     svgSurface.setTransformSelection(null);
     svgSurface.setConnectorEndpointSelection(null);
     elements.selectionPropertiesForm.hidden = true;
+    elements.connectorStyleForm.hidden = true;
     elements.appearanceForm.hidden = true;
+    connectorStyleBaseline = null;
     appearanceBaseline = null;
     return;
   }
@@ -592,6 +613,7 @@ function renderSelectionProperties(details) {
   const hasText = primary.text !== null && primary.text !== undefined;
   elements.propertyTextField.hidden = !hasText;
   elements.propertyTextNote.hidden = !hasText || primary.textEditable;
+  renderConnectorStyle(primary.connector);
   renderAppearance(primary.appearance);
 
   if (hasText) {
@@ -604,6 +626,105 @@ function renderSelectionProperties(details) {
   }
 }
 
+
+function setConnectorEnumSelect(select, value, label) {
+  for (const option of [...select.options]) {
+    if (option.dataset.legacyCustom === 'true') {
+      option.remove();
+    }
+  }
+  const choice = connectorEnumChoice(value);
+  if (choice.startsWith('custom:')) {
+    const option = document.createElement('option');
+    option.value = choice;
+    option.textContent = `${label} · legacy custom (${value.code})`;
+    option.dataset.legacyCustom = 'true';
+    select.prepend(option);
+  }
+  select.value = choice;
+}
+
+function updateConnectorSecondaryState() {
+  const relevant = connectorUsesSecondary({
+    lineChoice: elements.connectorLineStyle.value,
+    startChoice: elements.connectorStartMarker.value,
+    endChoice: elements.connectorEndMarker.value,
+  });
+  const enabled = elements.connectorSecondaryEnabled.checked;
+  elements.connectorSecondarySection.hidden = !relevant && !enabled;
+  elements.connectorSecondaryColor.disabled = !enabled;
+  if (connectorStyleBaseline?.secondaryColor?.kind === 'system_palette') {
+    elements.connectorSecondaryNote.textContent =
+      'Imported system colour is preserved exactly until you change this colour picker.';
+  } else {
+    elements.connectorSecondaryNote.textContent = relevant
+      ? 'Used by Outline and UML/custom marker interiors. Disabled uses the domain default.'
+      : 'Stored secondary colour is retained even when the current standard style does not use it.';
+  }
+}
+
+function renderConnectorStyle(connector) {
+  elements.connectorStyleForm.hidden = !connector;
+  elements.applyConnectorStyle.disabled = !connector || isBusy;
+  if (!connector) {
+    connectorStyleBaseline = null;
+    return;
+  }
+
+  connectorStyleBaseline = JSON.parse(JSON.stringify(connector));
+  setConnectorEnumSelect(elements.connectorStartMarker, connector.startMarker, 'Start');
+  setConnectorEnumSelect(elements.connectorEndMarker, connector.endMarker, 'End');
+  setConnectorEnumSelect(elements.connectorLineStyle, connector.lineStyle, 'Line');
+  elements.connectorSecondaryEnabled.checked = connector.secondaryColor !== null;
+  elements.connectorSecondaryColor.value = connectorColorHex(connector.secondaryColor);
+  updateConnectorSecondaryState();
+}
+
+async function applyConnectorStyle(event) {
+  event.preventDefault();
+  const primary = currentSelectionProperties?.primary;
+  const baseline = connectorStyleBaseline;
+  if (!invoke || !primary?.connector || !baseline) {
+    return;
+  }
+
+  let request;
+  try {
+    request = buildConnectorStyleRequest({
+      elementId: primary.elementId,
+      startChoice: elements.connectorStartMarker.value,
+      endChoice: elements.connectorEndMarker.value,
+      lineChoice: elements.connectorLineStyle.value,
+      secondaryEnabled: elements.connectorSecondaryEnabled.checked,
+      secondaryHex: elements.connectorSecondaryColor.value,
+      baselineSecondaryColor: baseline.secondaryColor,
+    });
+  } catch (error) {
+    setStatus(String(error?.message ?? error));
+    return;
+  }
+  if (connectorStyleEquals(baseline, request)) {
+    setStatus('Connector style unchanged');
+    return;
+  }
+
+  setBusy(true);
+  try {
+    const result = await invoke('update_connector_style', { request });
+    renderState(result.state);
+    await refreshPresentation({ preserveSelection: true });
+    const selection = result.selectedElementIds ?? [primary.elementId];
+    svgSurface.setSelection(selection);
+    keyboardSurface?.syncSelectionState(selection);
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus('Connector style updated');
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
 
 function renderAppearance(appearance) {
   const available = Boolean(
@@ -1439,6 +1560,14 @@ elements.deleteSelection.addEventListener('click', () => {
 elements.selectionPropertiesForm.addEventListener('submit', (event) => {
   void applyElementProperties(event);
 });
+
+elements.connectorStyleForm.addEventListener('submit', (event) => {
+  void applyConnectorStyle(event);
+});
+elements.connectorStartMarker.addEventListener('change', updateConnectorSecondaryState);
+elements.connectorEndMarker.addEventListener('change', updateConnectorSecondaryState);
+elements.connectorLineStyle.addEventListener('change', updateConnectorSecondaryState);
+elements.connectorSecondaryEnabled.addEventListener('change', updateConnectorSecondaryState);
 
 elements.appearanceForm.addEventListener('submit', (event) => {
   void applyAppearance(event);
