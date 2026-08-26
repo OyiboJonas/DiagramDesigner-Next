@@ -1,46 +1,176 @@
 [[permission]]
 identifier = "allow-document-state"
-description = "Allows the main editor window to read non-sensitive document session state."
+description = "Allows the main editor window to invoke the document_state application command."
 commands.allow = ["document_state"]
 
 [[permission]]
+identifier = "allow-document-navigation"
+description = "Allows the main editor window to invoke the document_navigation application command."
+commands.allow = ["document_navigation"]
+
+[[permission]]
+identifier = "allow-activate-page"
+description = "Allows the main editor window to invoke the activate_page application command."
+commands.allow = ["activate_page"]
+
+[[permission]]
+identifier = "allow-activate-layer"
+description = "Allows the main editor window to invoke the activate_layer application command."
+commands.allow = ["activate_layer"]
+
+[[permission]]
+identifier = "allow-create-page"
+description = "Allows the main editor window to invoke the create_page application command."
+commands.allow = ["create_page"]
+
+[[permission]]
+identifier = "allow-delete-page"
+description = "Allows the main editor window to invoke the delete_page application command."
+commands.allow = ["delete_page"]
+
+[[permission]]
+identifier = "allow-update-page-properties"
+description = "Allows the main editor window to invoke the update_page_properties application command."
+commands.allow = ["update_page_properties"]
+
+[[permission]]
+identifier = "allow-create-layer"
+description = "Allows the main editor window to invoke the create_layer application command."
+commands.allow = ["create_layer"]
+
+[[permission]]
+identifier = "allow-delete-layer"
+description = "Allows the main editor window to invoke the delete_layer application command."
+commands.allow = ["delete_layer"]
+
+[[permission]]
+identifier = "allow-update-layer-properties"
+description = "Allows the main editor window to invoke the update_layer_properties application command."
+commands.allow = ["update_layer_properties"]
+
+[[permission]]
 identifier = "allow-candidate-page-presentation"
-description = "Allows the main editor window to request the current page through the renderer-candidate presentation boundary."
+description = "Allows the main editor window to invoke the candidate_page_presentation application command."
 commands.allow = ["candidate_page_presentation"]
 
 [[permission]]
 identifier = "allow-set-selection"
-description = "Allows the main editor window to update transient editor selection without mutating persistent document state."
+description = "Allows the main editor window to invoke the set_selection application command."
 commands.allow = ["set_selection"]
 
 [[permission]]
+identifier = "allow-selection-properties"
+description = "Allows the main editor window to invoke the selection_properties application command."
+commands.allow = ["selection_properties"]
+
+[[permission]]
+identifier = "allow-group-selection"
+description = "Allows the main editor window to invoke the group_selection application command."
+commands.allow = ["group_selection"]
+
+[[permission]]
+identifier = "allow-ungroup-selection"
+description = "Allows the main editor window to invoke the ungroup_selection application command."
+commands.allow = ["ungroup_selection"]
+
+[[permission]]
+identifier = "allow-reorder-selection"
+description = "Allows the main editor window to invoke the reorder_selection application command."
+commands.allow = ["reorder_selection"]
+
+[[permission]]
+identifier = "allow-copy-selection"
+description = "Allows the main editor window to invoke the copy_selection application command."
+commands.allow = ["copy_selection"]
+
+[[permission]]
+identifier = "allow-paste-selection"
+description = "Allows the main editor window to invoke the paste_selection application command."
+commands.allow = ["paste_selection"]
+
+[[permission]]
+identifier = "allow-duplicate-selection"
+description = "Allows the main editor window to invoke the duplicate_selection application command."
+commands.allow = ["duplicate_selection"]
+
+[[permission]]
+identifier = "allow-create-basic-element"
+description = "Allows the main editor window to invoke the create_basic_element application command."
+commands.allow = ["create_basic_element"]
+
+[[permission]]
+identifier = "allow-create-connector"
+description = "Allows the main editor window to invoke the create_connector application command."
+commands.allow = ["create_connector"]
+
+[[permission]]
+identifier = "allow-set-connector-endpoint"
+description = "Allows the main editor window to invoke the set_connector_endpoint application command."
+commands.allow = ["set_connector_endpoint"]
+
+[[permission]]
+identifier = "allow-delete-selection"
+description = "Allows the main editor window to invoke the delete_selection application command."
+commands.allow = ["delete_selection"]
+
+[[permission]]
+identifier = "allow-update-element-properties"
+description = "Allows the main editor window to invoke the update_element_properties application command."
+commands.allow = ["update_element_properties"]
+
+[[permission]]
+identifier = "allow-update-element-appearance"
+description = "Allows the main editor window to invoke the update_element_appearance application command."
+commands.allow = ["update_element_appearance"]
+
+[[permission]]
 identifier = "allow-new-document"
-description = "Allows the main editor window to create a new in-memory document when no unsaved changes would be discarded."
+description = "Allows the main editor window to invoke the new_document application command."
 commands.allow = ["new_document"]
 
 [[permission]]
 identifier = "allow-open-document"
-description = "Allows the Rust backend to show a native DDNX picker and open only the user-selected document."
+description = "Allows the main editor window to invoke the open_document application command."
 commands.allow = ["open_document"]
 
 [[permission]]
 identifier = "allow-save-document"
-description = "Allows the Rust backend to save the current document through the verified DDNX and atomic filesystem boundary."
+description = "Allows the main editor window to invoke the save_document application command."
 commands.allow = ["save_document"]
 
 [[permission]]
+identifier = "allow-recovery-status"
+description = "Allows the main editor window to invoke the recovery_status application command."
+commands.allow = ["recovery_status"]
+
+[[permission]]
+identifier = "allow-restore-recovery"
+description = "Allows the main editor window to invoke the restore_recovery application command."
+commands.allow = ["restore_recovery"]
+
+[[permission]]
+identifier = "allow-discard-recovery"
+description = "Allows the main editor window to invoke the discard_recovery application command."
+commands.allow = ["discard_recovery"]
+
+[[permission]]
+identifier = "allow-sync-recovery"
+description = "Allows the main editor window to invoke the sync_recovery application command."
+commands.allow = ["sync_recovery"]
+
+[[permission]]
 identifier = "allow-undo"
-description = "Allows one semantic Undo operation in the current editor session."
+description = "Allows the main editor window to invoke the undo application command."
 commands.allow = ["undo"]
 
 [[permission]]
 identifier = "allow-redo"
-description = "Allows one semantic Redo operation in the current editor session."
+description = "Allows the main editor window to invoke the redo application command."
 commands.allow = ["redo"]
 
 [[permission]]
 identifier = "allow-commit-move-elements"
-description = "Allows a completed frontend drag gesture to commit one typed MoveElements command."
+description = "Allows the main editor window to invoke the commit_move_elements application command."
 commands.allow = ["commit_move_elements"]
 
 [[permission]]
@@ -50,15 +180,15 @@ commands.allow = ["open_renderer_benchmark"]
 
 [[permission]]
 identifier = "allow-renderer-benchmark-environment"
-description = "Allows only the dedicated renderer benchmark window to read its physical client, monitor and source-build metadata."
+description = "Allows only the dedicated renderer benchmark window to invoke the renderer_benchmark_environment application command."
 commands.allow = ["renderer_benchmark_environment"]
 
 [[permission]]
 identifier = "allow-persist-renderer-benchmark-evidence"
-description = "Allows only the dedicated renderer benchmark window to submit one validated ADR-019 report for Rust-owned atomic evidence storage."
+description = "Allows only the dedicated renderer benchmark window to invoke the persist_renderer_benchmark_evidence application command."
 commands.allow = ["persist_renderer_benchmark_evidence"]
 
 [[permission]]
 identifier = "allow-close-renderer-benchmark"
-description = "Allows only the dedicated renderer benchmark window to close itself."
+description = "Allows only the dedicated renderer benchmark window to invoke the close_renderer_benchmark application command."
 commands.allow = ["close_renderer_benchmark"]

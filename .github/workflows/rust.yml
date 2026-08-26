@@ -34,6 +34,8 @@ jobs:
         run: cargo test --locked --manifest-path crates/platform-fs/Cargo.toml
       - name: Desktop Rust format
         run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+      - name: Desktop command ACL contract
+        run: python scripts/check-desktop-command-acl.py
       - name: Desktop shell JavaScript syntax
         run: |
           node --check apps/desktop/ui/app.js
