@@ -78,6 +78,65 @@ fn roots(app: &ApplicationSession) -> Vec<ElementId> {
         .clone()
 }
 
+
+#[test]
+fn structural_group_z_order_round_trips_without_changing_children() {
+    let (artifact, ids) = fixture();
+    let mut app = ApplicationSession::from_artifact(artifact).unwrap();
+    let group_id = ElementId::new();
+    assert!(
+        app.group_elements(group_id, vec![ids[0], ids[1]], "Pair".to_owned())
+            .unwrap()
+    );
+    assert_eq!(roots(&app), vec![group_id, ids[2]]);
+
+    let group_children = |app: &ApplicationSession| {
+        let group = app.session().document().pages[0].layers[0]
+            .scene
+            .elements
+            .iter()
+            .find(|element| element.id == group_id)
+            .unwrap();
+        let ElementKind::Group { children } = &group.kind else {
+            panic!("expected structural group")
+        };
+        children.clone()
+    };
+    assert_eq!(group_children(&app), vec![ids[0], ids[1]]);
+    let grouped_history = app.session().current_history_state();
+
+    assert!(
+        app.reorder_elements(vec![group_id], ZOrderOperation::BringToFront)
+            .unwrap()
+    );
+    assert_eq!(roots(&app), vec![ids[2], group_id]);
+    assert_eq!(group_children(&app), vec![ids[0], ids[1]]);
+    let reordered_history = app.session().current_history_state();
+    assert_ne!(reordered_history, grouped_history);
+
+    let prepared = app.prepare_document_save(PackageLimits::default()).unwrap();
+    let reopened =
+        ApplicationSession::from_ddnx_bytes(prepared.bytes(), PackageLimits::default()).unwrap();
+    assert_eq!(roots(&reopened), vec![ids[2], group_id]);
+    assert_eq!(group_children(&reopened), vec![ids[0], ids[1]]);
+
+    assert!(app.undo().unwrap());
+    assert_eq!(app.session().current_history_state(), grouped_history);
+    assert_eq!(roots(&app), vec![group_id, ids[2]]);
+    assert_eq!(group_children(&app), vec![ids[0], ids[1]]);
+    assert!(app.redo().unwrap());
+    assert_eq!(app.session().current_history_state(), reordered_history);
+    assert_eq!(roots(&app), vec![ids[2], group_id]);
+    assert_eq!(group_children(&app), vec![ids[0], ids[1]]);
+
+    let before_noop = app.session().current_history_state();
+    assert!(
+        !app.reorder_elements(vec![group_id], ZOrderOperation::BringToFront)
+            .unwrap()
+    );
+    assert_eq!(app.session().current_history_state(), before_noop);
+}
+
 #[test]
 fn z_order_round_trips_through_application_history_and_ddnx() {
     let (artifact, ids) = fixture();
