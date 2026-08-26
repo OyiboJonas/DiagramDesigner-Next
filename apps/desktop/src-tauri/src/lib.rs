@@ -1,4 +1,5 @@
 mod clipboard;
+mod grouping;
 mod legacy_import;
 mod renderer_benchmark_evidence;
 
@@ -147,6 +148,7 @@ struct CandidatePagePresentationDto {
     width_mm: f64,
     height_mm: f64,
     snap_elements: Vec<SnapElementDto>,
+    selection_groups: Vec<SelectionGroupDto>,
     port_targets: Vec<PortTargetDto>,
     svg: String,
     rendered_elements: usize,
@@ -162,6 +164,14 @@ struct SnapElementDto {
     element_id: ElementId,
     bounds_mm: Rect,
     rotation_deg: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectionGroupDto {
+    group_id: ElementId,
+    bounds_mm: Rect,
+    leaf_element_ids: Vec<ElementId>,
 }
 
 #[derive(Debug, Serialize)]
@@ -347,6 +357,9 @@ struct ElementEditResultDto {
 struct SelectionPropertiesDto {
     count: usize,
     primary: Option<ElementPropertiesDto>,
+    can_group: bool,
+    can_ungroup: bool,
+    contains_group: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -800,7 +813,15 @@ fn candidate_page_presentation(
     // Snapping consumes renderer-neutral document geometry rather than SVG DOM
     // measurements. The candidate adapter can therefore be replaced after ADR-019
     // without changing the movement or snapping contract.
-    let snap_elements = plan
+    let selection_groups: Vec<_> = grouping::selection_groups(session.document())
+        .into_iter()
+        .map(|group| SelectionGroupDto {
+            group_id: group.group_id,
+            bounds_mm: group.bounds_mm,
+            leaf_element_ids: group.leaf_element_ids,
+        })
+        .collect();
+    let mut snap_elements: Vec<SnapElementDto> = plan
         .items
         .iter()
         .map(|item| SnapElementDto {
@@ -809,6 +830,11 @@ fn candidate_page_presentation(
             rotation_deg: item.element.rotation_deg,
         })
         .collect();
+    snap_elements.extend(selection_groups.iter().map(|group| SnapElementDto {
+        element_id: group.group_id,
+        bounds_mm: group.bounds_mm,
+        rotation_deg: 0.0,
+    }));
     let port_targets = document
         .session
         .active_page_layer_ports()
@@ -834,6 +860,7 @@ fn candidate_page_presentation(
         width_mm: page.size_mm.width,
         height_mm: page.size_mm.height,
         snap_elements,
+        selection_groups,
         port_targets,
         svg: rendered.svg,
         rendered_elements: rendered.rendered_elements,
@@ -893,10 +920,91 @@ fn selection_properties(
     } else {
         None
     };
+    let grouping_state = grouping::selection_capabilities(
+        session.document(),
+        session.active_page_id(),
+        document.session.active_page_layer_id(),
+        &selected,
+    );
     Ok(SelectionPropertiesDto {
         count: selected.len(),
         primary,
+        can_group: grouping_state.can_group,
+        can_ungroup: grouping_state.can_ungroup,
+        contains_group: grouping_state.contains_group,
     })
+}
+
+#[tauri::command]
+fn group_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let selected: Vec<_> = document
+        .session
+        .session()
+        .selection()
+        .iter()
+        .copied()
+        .collect();
+    let capabilities = grouping::selection_capabilities(
+        document.session.session().document(),
+        document.session.session().active_page_id(),
+        document.session.active_page_layer_id(),
+        &selected,
+    );
+    if !capabilities.can_group {
+        return Err(CommandError::new(
+            "group_selection_invalid",
+            "Select at least two adjacent top-level elements on the visible, unlocked active layer.",
+        ));
+    }
+
+    let group_id = ElementId::new();
+    document
+        .session
+        .group_elements(group_id, selected, "Group".to_owned())
+        .map_err(|error| CommandError::new("group_selection_failed", error.to_string()))?;
+    document
+        .session
+        .set_selection([group_id])
+        .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
+    Ok(element_edit_result_dto(&document))
+}
+
+#[tauri::command]
+fn ungroup_selection(state: State<'_, DesktopState>) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let selected: Vec<_> = document
+        .session
+        .session()
+        .selection()
+        .iter()
+        .copied()
+        .collect();
+    let page_id = document.session.session().active_page_id();
+    let layer_id = document.session.active_page_layer_id();
+    let children = grouping::selected_group_children(
+        document.session.session().document(),
+        page_id,
+        layer_id,
+        &selected,
+    )
+    .ok_or_else(|| {
+        CommandError::new(
+            "ungroup_selection_invalid",
+            "Select one top-level group on the visible, unlocked active layer.",
+        )
+    })?;
+    let group_id = selected[0];
+
+    document
+        .session
+        .ungroup(group_id)
+        .map_err(|error| CommandError::new("ungroup_selection_failed", error.to_string()))?;
+    document
+        .session
+        .set_selection(children)
+        .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
+    Ok(element_edit_result_dto(&document))
 }
 
 #[tauri::command]
@@ -2613,6 +2721,8 @@ pub fn run() {
             candidate_page_presentation,
             set_selection,
             selection_properties,
+            group_selection,
+            ungroup_selection,
             reorder_selection,
             copy_selection,
             paste_selection,

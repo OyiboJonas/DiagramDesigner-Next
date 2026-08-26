@@ -290,6 +290,25 @@ impl ApplicationSession {
         })
     }
 
+    /// Group direct sibling elements through editor-core's structural command.
+    pub fn group_elements(
+        &mut self,
+        group_id: ElementId,
+        element_ids: Vec<ElementId>,
+        name: String,
+    ) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::GroupElements {
+            group_id,
+            element_ids,
+            name,
+        })
+    }
+
+    /// Ungroup one structural group as one semantic history step.
+    pub fn ungroup(&mut self, group_id: ElementId) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::Ungroup { group_id })
+    }
+
     /// Create one element through the editor-core semantic command boundary.
     pub fn create_element(
         &mut self,

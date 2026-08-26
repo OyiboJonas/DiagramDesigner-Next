@@ -3,6 +3,7 @@ import { createSvgSurface } from './svg-surface.mjs';
 import { buildRulerTicks } from './editor-interaction/snapping.mjs';
 import { isTextEditingTarget, resolveApplicationShortcut } from './editor-interaction/app-shortcuts.mjs';
 import { createZOrderRequest, isZOrderActionEnabled } from './editor-interaction/z-order-actions.mjs';
+import { isGroupActionEnabled, isUngroupActionEnabled } from './editor-interaction/group-actions.mjs';
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -19,6 +20,8 @@ const elements = {
   sendBackward: document.querySelector('#send-backward'),
   bringForward: document.querySelector('#bring-forward'),
   bringToFront: document.querySelector('#bring-to-front'),
+  groupSelection: document.querySelector('#group-selection'),
+  ungroupSelection: document.querySelector('#ungroup-selection'),
   toggleGrid: document.querySelector('#toggle-grid'),
   toggleSnap: document.querySelector('#toggle-snap'),
   addRectangle: document.querySelector('#add-rectangle'),
@@ -93,6 +96,7 @@ const zOrderButtons = [
   elements.bringForward,
   elements.bringToFront,
 ];
+const groupingButtons = [elements.groupSelection, elements.ungroupSelection];
 
 const actionButtons = [
   elements.newDocument,
@@ -104,6 +108,7 @@ const actionButtons = [
   elements.pasteSelection,
   elements.duplicateSelection,
   ...zOrderButtons,
+  ...groupingButtons,
   elements.addRectangle,
   elements.addEllipse,
   elements.addText,
@@ -155,6 +160,7 @@ const svgSurface = createSvgSurface(elements.canvasPage, {
 keyboardSurface = createSvgKeyboardSurface(elements.canvasPage, {
   getSelection: () => svgSurface.selectedElementIds,
   setSelection: (elementIds) => svgSurface.setSelection(elementIds),
+  resolveElementId: (elementId) => svgSurface.resolveSelectionId(elementId),
   onStatus: setStatus,
 });
 keyboardSurface.clear();
@@ -170,6 +176,7 @@ function setBusy(busy) {
   elements.pageSelect.disabled = busy;
   elements.layerSelect.disabled = busy;
   updateZOrderActionState();
+  updateGroupingActionState();
   if (!busy) {
     const selectionCount = Number(currentSelectionProperties?.count ?? 0);
     const primary = currentSelectionProperties?.primary ?? null;
@@ -184,9 +191,20 @@ function setBusy(busy) {
 
 function updateClipboardActionState() {
   const selectionCount = Number(currentSelectionProperties?.count ?? 0);
-  elements.copySelection.disabled = isBusy || selectionCount === 0;
-  elements.duplicateSelection.disabled = isBusy || selectionCount === 0;
+  const containsGroup = currentSelectionProperties?.containsGroup === true;
+  elements.copySelection.disabled = isBusy || selectionCount === 0 || containsGroup;
+  elements.duplicateSelection.disabled = isBusy || selectionCount === 0 || containsGroup;
   elements.pasteSelection.disabled = isBusy || !clipboardAvailable;
+  const groupReason = containsGroup
+    ? 'Structural groups are not copied or duplicated in this slice; ungroup first'
+    : null;
+  if (groupReason) {
+    elements.copySelection.title = groupReason;
+    elements.duplicateSelection.title = groupReason;
+  } else {
+    elements.copySelection.title = 'Copy the current selection (Ctrl/Cmd+C)';
+    elements.duplicateSelection.title = 'Duplicate the current selection (Ctrl/Cmd+D)';
+  }
 }
 
 function activeLayerForZOrder() {
@@ -198,17 +216,22 @@ function activeLayerForZOrder() {
 function updateZOrderActionState() {
   const selectionCount = Number(currentSelectionProperties?.count ?? 0);
   const activeLayer = activeLayerForZOrder();
-  const enabled = isZOrderActionEnabled({
-    selectionCount,
-    layerVisible: activeLayer?.visible === true,
-    layerLocked: activeLayer?.locked !== false,
-    busy: isBusy,
-  });
+  const containsGroup = currentSelectionProperties?.containsGroup === true;
+  const enabled =
+    !containsGroup &&
+    isZOrderActionEnabled({
+      selectionCount,
+      layerVisible: activeLayer?.visible === true,
+      layerLocked: activeLayer?.locked !== false,
+      busy: isBusy,
+    });
   const reason = isBusy
     ? 'Finish the current action first'
     : selectionCount === 0
       ? 'Select one or more elements to arrange them'
-      : !activeLayer?.visible
+      : containsGroup
+        ? 'Structural groups keep their current z-order in this slice; ungroup before arranging'
+        : !activeLayer?.visible
         ? 'Show the active layer before arranging elements'
         : activeLayer?.locked
           ? 'Unlock the active layer before arranging elements'
@@ -223,6 +246,32 @@ function updateZOrderActionState() {
     button.disabled = !enabled;
     button.title = enabled ? enabledTitles[index] : reason;
   });
+}
+
+function updateGroupingActionState() {
+  const selectionCount = Number(currentSelectionProperties?.count ?? 0);
+  const canGroup = isGroupActionEnabled({
+    canGroup: currentSelectionProperties?.canGroup === true,
+    busy: isBusy,
+  });
+  const canUngroup = isUngroupActionEnabled({
+    canUngroup: currentSelectionProperties?.canUngroup === true,
+    busy: isBusy,
+  });
+  elements.groupSelection.disabled = !canGroup;
+  elements.ungroupSelection.disabled = !canUngroup;
+  elements.groupSelection.title = canGroup
+    ? 'Group the selected adjacent top-level elements'
+    : isBusy
+      ? 'Finish the current action first'
+      : selectionCount < 2
+        ? 'Select at least two adjacent top-level elements to group them'
+        : 'Grouping requires adjacent top-level elements on the visible, unlocked active layer';
+  elements.ungroupSelection.title = canUngroup
+    ? 'Ungroup the selected structural group'
+    : isBusy
+      ? 'Finish the current action first'
+      : 'Select one top-level group on the visible, unlocked active layer';
 }
 
 function setRecoveryBusy(busy) {
@@ -498,6 +547,7 @@ function renderSelectionProperties(details) {
   elements.deleteSelection.disabled = count === 0;
   updateClipboardActionState();
   updateZOrderActionState();
+  updateGroupingActionState();
 
   const primary = details?.primary ?? null;
   elements.applyProperties.disabled =
@@ -840,6 +890,50 @@ async function reorderCurrentSelection(operation) {
     await refreshSelectionProperties();
     scheduleRecoverySync(250);
     setStatus(labels[operation]);
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function groupCurrentSelection() {
+  if (!invoke || currentSelectionProperties?.canGroup !== true) {
+    return;
+  }
+  setBusy(true);
+  try {
+    const result = await invoke('group_selection');
+    renderState(result.state);
+    await refreshPresentation({ preserveSelection: false });
+    const selection = result.selectedElementIds ?? [];
+    svgSurface.setSelection(selection);
+    keyboardSurface?.syncSelectionState(selection);
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus('Selection grouped');
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function ungroupCurrentSelection() {
+  if (!invoke || currentSelectionProperties?.canUngroup !== true) {
+    return;
+  }
+  setBusy(true);
+  try {
+    const result = await invoke('ungroup_selection');
+    renderState(result.state);
+    await refreshPresentation({ preserveSelection: false });
+    const selection = result.selectedElementIds ?? [];
+    svgSurface.setSelection(selection);
+    keyboardSurface?.syncSelectionState(selection);
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus('Group dissolved');
   } catch (error) {
     setStatus(formatInvokeError(error));
   } finally {
@@ -1337,6 +1431,14 @@ elements.bringToFront.addEventListener('click', () => {
   void reorderCurrentSelection('bringToFront');
 });
 
+elements.groupSelection.addEventListener('click', () => {
+  void groupCurrentSelection();
+});
+
+elements.ungroupSelection.addEventListener('click', () => {
+  void ungroupCurrentSelection();
+});
+
 elements.deleteSelection.addEventListener('click', () => {
   void deleteCurrentSelection();
 });
@@ -1440,11 +1542,13 @@ window.addEventListener(
       );
       if (shortcut) {
         const selectionCount = Number(currentSelectionProperties?.count ?? 0);
+        const containsGroup = currentSelectionProperties?.containsGroup === true;
         if (
           ((shortcut === 'delete-selection' ||
             shortcut === 'copy-selection' ||
             shortcut === 'duplicate-selection') &&
             selectionCount === 0) ||
+          ((shortcut === 'copy-selection' || shortcut === 'duplicate-selection') && containsGroup) ||
           (shortcut === 'paste-selection' && !clipboardAvailable)
         ) {
           return;
