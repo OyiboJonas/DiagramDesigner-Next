@@ -1,0 +1,45 @@
+name: Apply z-order inspector UI
+
+on:
+  push:
+    branches:
+      - desktop-z-order-controls
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desktop-z-order-controls
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt
+      - name: Apply inspector patch
+        run: python .github/scripts/apply-z-order-rust.py
+      - name: Format application tests
+        run: cargo fmt --manifest-path crates/app-core/Cargo.toml
+      - name: JavaScript syntax
+        run: |
+          node --check apps/desktop/ui/app.js
+          node --check apps/desktop/ui/editor-interaction/z-order-actions.mjs
+      - name: Frontend z-order tests
+        run: node --test web/editor-interaction/z-order-actions.test.mjs
+      - name: Application z-order tests
+        run: cargo test --manifest-path crates/app-core/Cargo.toml --test z_order_application
+      - name: Verify diff
+        run: git diff --check
+      - name: Commit product changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/desktop/ui/app.js apps/desktop/ui/index.html apps/desktop/ui/styles.css crates/app-core/tests/z_order_application.rs
+          git commit -m "Desktop: add z-order arrange controls"
+          git push origin HEAD:desktop-z-order-controls
