@@ -5,6 +5,7 @@ on:
     branches: [editor-align-distribute]
     paths:
       - scripts/apply-align-distribute-core.py
+      - scripts/fix-align-distribute-core-output.py
       - .github/workflows/apply-align-distribute-core.yml
   workflow_dispatch:
 
@@ -24,7 +25,9 @@ jobs:
           toolchain: 1.85.0
           components: rustfmt, clippy
       - name: Apply align distribute core changes
-        run: python scripts/apply-align-distribute-core.py
+        run: |
+          python scripts/apply-align-distribute-core.py
+          python scripts/fix-align-distribute-core-output.py
       - name: Format
         run: |
           cargo fmt --all
@@ -45,7 +48,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git rm .github/workflows/apply-align-distribute-core.yml scripts/apply-align-distribute-core.py
+          git rm \
+            .github/workflows/apply-align-distribute-core.yml \
+            scripts/apply-align-distribute-core.py \
+            scripts/fix-align-distribute-core-output.py
           git add \
             crates/editor-core/src/lib.rs \
             crates/editor-core/tests/arrange_elements.rs \
