@@ -193,6 +193,32 @@
                 </div>
                 <p class="property-note">Blank family or size uses the document default. Other imported text-style semantics are preserved.</p>
               </section>
+              <section id="property-text-layout" class="text-formatting-section" aria-label="Text block layout" hidden>
+                <div class="text-formatting-heading">
+                  <strong>Text layout</strong>
+                  <span>block geometry</span>
+                </div>
+                <div class="text-layout-grid">
+                  <label class="property-field">Horizontal
+                    <select id="property-text-horizontal">
+                      <option value="left">Left</option>
+                      <option value="center">Center</option>
+                      <option value="right">Right</option>
+                    </select>
+                  </label>
+                  <label class="property-field">Vertical
+                    <select id="property-text-vertical">
+                      <option value="top">Top</option>
+                      <option value="center">Center</option>
+                      <option value="bottom">Bottom</option>
+                    </select>
+                  </label>
+                  <label class="property-field text-layout-margin">Inner margin (mm)
+                    <input id="property-text-margin" type="number" min="0" step="0.1" />
+                  </label>
+                </div>
+                <p id="property-text-layout-note" class="property-note"></p>
+              </section>
               <button id="apply-properties" class="primary" type="submit">Apply properties</button>
             </form>
 
