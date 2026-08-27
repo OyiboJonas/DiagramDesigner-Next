@@ -1,0 +1,40 @@
+name: Format text layout desktop Rust
+
+on:
+  push:
+    branches:
+      - editor-text-layout
+    paths:
+      - .github/workflows/format-text-layout-desktop.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: editor-text-layout
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply exact rustfmt changes
+        run: python .github/scripts/format-text-layout-desktop.py
+      - name: Verify desktop Rust format
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+      - name: Verify app-core Rust format
+        run: cargo fmt --manifest-path crates/app-core/Cargo.toml -- --check
+      - name: Remove one-shot helpers
+        run: rm .github/scripts/format-text-layout-desktop.py .github/workflows/format-text-layout-desktop.yml
+      - name: Commit format-only fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Tests: format desktop text layout integration"
+          git push origin HEAD:editor-text-layout
