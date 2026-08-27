@@ -26,13 +26,17 @@ jobs:
       - name: Apply align distribute core changes
         run: python scripts/apply-align-distribute-core.py
       - name: Format
-        run: cargo fmt --all
+        run: |
+          cargo fmt --all
+          cargo fmt --manifest-path crates/app-core/Cargo.toml
       - name: Editor core tests
         run: cargo test --locked -p editor-core
       - name: Application core arrange tests
-        run: cargo test --locked -p app-core --test arrange_application
+        run: cargo test --locked --manifest-path crates/app-core/Cargo.toml --test arrange_application
       - name: Application core tests
-        run: cargo test --locked -p app-core
+        run: cargo test --locked --manifest-path crates/app-core/Cargo.toml
+      - name: Application core Clippy
+        run: cargo clippy --locked --manifest-path crates/app-core/Cargo.toml --all-targets -- -D warnings
       - name: Workspace Clippy
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Diff check
