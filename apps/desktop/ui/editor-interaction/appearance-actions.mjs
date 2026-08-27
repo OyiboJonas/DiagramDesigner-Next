@@ -26,6 +26,8 @@ function gradientAxis(value) {
  * Colour fields are emitted only when their displayed value changed. That is
  * important for imported system-palette colours: the desktop DTO may display a
  * neutral RGB fallback, while omission keeps the original domain colour intact.
+ * Detail fields belonging to a disabled stroke/fill are deliberately omitted so
+ * stale disabled controls can never recreate paint that the user just disabled.
  */
 export function buildAppearanceRequest({
   elementId,
@@ -55,18 +57,20 @@ export function buildAppearanceRequest({
       request.strokeEnabled = nextEnabled;
     }
 
-    const nextColor = colorHex(strokeColor, 'stroke colour');
-    const previousColor = colorHex(baseline.strokeColor, 'baseline stroke colour');
-    if (nextColor !== previousColor) {
-      request.strokeColor = nextColor;
-    }
+    if (nextEnabled) {
+      const nextColor = colorHex(strokeColor, 'stroke colour');
+      const previousColor = colorHex(baseline.strokeColor, 'baseline stroke colour');
+      if (nextColor !== previousColor) {
+        request.strokeColor = nextColor;
+      }
 
-    const width = Number(strokeWidthMm);
-    if (!Number.isFinite(width) || width <= 0) {
-      throw new AppearanceContractError('stroke width must be a finite positive value');
-    }
-    if (width !== Number(baseline.strokeWidthMm)) {
-      request.strokeWidthMm = width;
+      const width = Number(strokeWidthMm);
+      if (!Number.isFinite(width) || width <= 0) {
+        throw new AppearanceContractError('stroke width must be a finite positive value');
+      }
+      if (width !== Number(baseline.strokeWidthMm)) {
+        request.strokeWidthMm = width;
+      }
     }
   }
 
@@ -76,16 +80,15 @@ export function buildAppearanceRequest({
       request.fillEnabled = nextFillEnabled;
     }
 
-    const nextFillColor = colorHex(fillColor, 'fill colour');
-    const previousFillColor = colorHex(baseline.fillColor, 'baseline fill colour');
-    if (nextFillColor !== previousFillColor) {
-      request.fillColor = nextFillColor;
-    }
-
-    // Gradient detail controls are meaningful only while fill itself is enabled.
-    // When fill is disabled the Rust boundary removes the entire FillStyle,
-    // including any gradient, in one semantic appearance edit.
+    // Fill/gradient detail controls are meaningful only while fill itself is
+    // enabled. Disabling fill removes the entire FillStyle in Rust.
     if (nextFillEnabled) {
+      const nextFillColor = colorHex(fillColor, 'fill colour');
+      const previousFillColor = colorHex(baseline.fillColor, 'baseline fill colour');
+      if (nextFillColor !== previousFillColor) {
+        request.fillColor = nextFillColor;
+      }
+
       const nextGradientEnabled = fillGradientEnabled === true;
       if (nextGradientEnabled !== baseline.fillGradientEnabled) {
         request.fillGradientEnabled = nextGradientEnabled;
