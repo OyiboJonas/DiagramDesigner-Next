@@ -39,7 +39,7 @@ jobs:
         run: node --test web/editor-interaction/text-layout-actions.test.mjs
 
       - name: Run app-core text regressions
-        run: cargo test --locked -p app-core --test text_properties_application
+        run: cargo test --locked --manifest-path crates/app-core/Cargo.toml --test text_properties_application
 
       - name: Remove one-shot integration helpers
         run: rm .github/scripts/apply-text-layout.py .github/workflows/integrate-text-layout.yml
