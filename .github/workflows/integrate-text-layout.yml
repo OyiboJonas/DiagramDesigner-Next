@@ -1,0 +1,56 @@
+name: Integrate text layout inspector
+
+on:
+  push:
+    branches:
+      - editor-text-layout
+    paths:
+      - .github/workflows/integrate-text-layout.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: editor-text-layout
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Apply guarded text layout patch
+        run: python .github/scripts/apply-text-layout.py
+
+      - name: Format Rust
+        run: cargo fmt --all
+
+      - name: Check desktop JavaScript syntax
+        run: node --check apps/desktop/ui/app.js
+
+      - name: Run text layout frontend regressions
+        run: node --test web/editor-interaction/text-layout-actions.test.mjs
+
+      - name: Run app-core text regressions
+        run: cargo test --locked -p app-core --test text_properties_application
+
+      - name: Remove one-shot integration helpers
+        run: rm .github/scripts/apply-text-layout.py .github/workflows/integrate-text-layout.yml
+
+      - name: Commit integrated slice
+        shell: bash
+        run: |
+          git status --short
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Editor: expose lossless text block layout"
+          git push origin HEAD:editor-text-layout
