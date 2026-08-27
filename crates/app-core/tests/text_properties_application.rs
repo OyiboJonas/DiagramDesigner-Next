@@ -210,13 +210,8 @@ fn layout_only_update_preserves_protected_rich_text_and_survives_ddnx() {
         },
     };
     assert!(
-        app.commit_element_properties(
-            element_id,
-            bounds(),
-            0.0,
-            Some(Some(protected.clone())),
-        )
-        .unwrap()
+        app.commit_element_properties(element_id, bounds(), 0.0, Some(Some(protected.clone())),)
+            .unwrap()
     );
     let protected_history = app.session().current_history_state();
 
@@ -227,13 +222,8 @@ fn layout_only_update_preserves_protected_rich_text_and_survives_ddnx() {
         margin_mm: 2.5,
     };
     assert!(
-        app.commit_element_properties(
-            element_id,
-            bounds(),
-            0.0,
-            Some(Some(layout_only.clone())),
-        )
-        .unwrap()
+        app.commit_element_properties(element_id, bounds(), 0.0, Some(Some(layout_only.clone())),)
+            .unwrap()
     );
     let layout_history = app.session().current_history_state();
     assert_ne!(layout_history, protected_history);
@@ -254,4 +244,3 @@ fn layout_only_update_preserves_protected_rich_text_and_survives_ddnx() {
     assert_eq!(app.session().current_history_state(), layout_history);
     assert_eq!(block(&app, element_id), &layout_only);
 }
-
