@@ -22,10 +22,10 @@ use ddnx::PackageLimits;
 use editor_runtime::RecoveryPlan;
 use next_domain::{
     AnchorSet, Color, Connection, Connector, ConnectorLabelStyle, Document, DocumentDefaults,
-    DocumentId, Element, ElementId, ElementKind, Endpoint, FillStyle, Layer, LayerId, LineStyle,
-    MarkerStyle, NextArtifact, NormalizedPoint, Page, PageId, Point, Port, PortId, Rect,
-    RichTextDocument, RichTextToken, Scene, Size, StrokeStyle, StyleId, TextBlock,
-    TextHorizontalAlignment, TextLayout, TextStyle, TextVerticalAlignment,
+    DocumentId, Element, ElementId, ElementKind, Endpoint, FillStyle, GradientAxis, Layer, LayerId,
+    LineStyle, LinearGradient, MarkerStyle, NextArtifact, NormalizedPoint, Page, PageId, Point,
+    Port, PortId, Rect, RichTextDocument, RichTextToken, Scene, Size, StrokeStyle, StyleId,
+    TextBlock, TextHorizontalAlignment, TextLayout, TextStyle, TextVerticalAlignment,
 };
 use platform_fs::{AtomicSaveError, CommitMode, DurabilityLevel, atomic_save};
 use render_plan::{RenderPlanOptions, build_page_plan};
@@ -361,6 +361,9 @@ struct UpdateElementAppearanceRequest {
     stroke_width_mm: Option<f64>,
     fill_enabled: Option<bool>,
     fill_color: Option<String>,
+    fill_gradient_enabled: Option<bool>,
+    fill_gradient_end_color: Option<String>,
+    fill_gradient_axis: Option<GradientAxis>,
     text_color: Option<String>,
 }
 
@@ -374,6 +377,9 @@ struct ElementAppearanceDto {
     fill_applicable: bool,
     fill_enabled: bool,
     fill_color: String,
+    fill_gradient_enabled: bool,
+    fill_gradient_end_color: String,
+    fill_gradient_axis: GradientAxis,
     text_color_applicable: bool,
     text_color: String,
 }
@@ -1851,12 +1857,37 @@ fn update_element_appearance(
         && (request.stroke_enabled.is_some()
             || request.stroke_color.is_some()
             || request.stroke_width_mm.is_some()))
-        || (!fill_applicable && (request.fill_enabled.is_some() || request.fill_color.is_some()))
+        || (!fill_applicable
+            && (request.fill_enabled.is_some()
+                || request.fill_color.is_some()
+                || request.fill_gradient_enabled.is_some()
+                || request.fill_gradient_end_color.is_some()
+                || request.fill_gradient_axis.is_some()))
         || (!text_color_applicable && request.text_color.is_some())
     {
         return Err(CommandError::new(
             "appearance_not_applicable",
             "The requested appearance field does not apply to this element type.",
+        ));
+    }
+
+    if request.fill_enabled == Some(false)
+        && (request.fill_color.is_some()
+            || request.fill_gradient_enabled.is_some()
+            || request.fill_gradient_end_color.is_some()
+            || request.fill_gradient_axis.is_some())
+    {
+        return Err(CommandError::new(
+            "appearance_fill_disabled_details",
+            "Fill detail fields cannot be changed while fill is being disabled.",
+        ));
+    }
+    if request.fill_gradient_enabled == Some(false)
+        && (request.fill_gradient_end_color.is_some() || request.fill_gradient_axis.is_some())
+    {
+        return Err(CommandError::new(
+            "appearance_gradient_disabled_details",
+            "Gradient detail fields cannot be changed while the gradient is being disabled.",
         ));
     }
 
@@ -1888,10 +1919,41 @@ fn update_element_appearance(
         }
     }
     if let Some(color) = request.fill_color.as_deref() {
-        let fill = fill.get_or_insert_with(default_fill);
-        fill.color = parse_rgb_color(color)?;
-        // Choosing a flat colour explicitly replaces an imported gradient.
-        fill.gradient = None;
+        fill.get_or_insert_with(default_fill).color = parse_rgb_color(color)?;
+    }
+    if let Some(enabled) = request.fill_gradient_enabled {
+        if enabled {
+            let fill = fill.get_or_insert_with(default_fill);
+            if fill.gradient.is_none() {
+                fill.gradient = Some(default_linear_gradient(fill.color));
+            }
+        } else if let Some(fill) = fill.as_mut() {
+            fill.gradient = None;
+        }
+    }
+    if let Some(color) = request.fill_gradient_end_color.as_deref() {
+        let gradient = fill
+            .as_mut()
+            .and_then(|fill| fill.gradient.as_mut())
+            .ok_or_else(|| {
+                CommandError::new(
+                    "appearance_gradient_missing",
+                    "Enable fill and its linear gradient before changing the gradient end colour.",
+                )
+            })?;
+        gradient.end_color = parse_rgb_color(color)?;
+    }
+    if let Some(axis) = request.fill_gradient_axis {
+        let gradient = fill
+            .as_mut()
+            .and_then(|fill| fill.gradient.as_mut())
+            .ok_or_else(|| {
+                CommandError::new(
+                    "appearance_gradient_missing",
+                    "Enable fill and its linear gradient before changing the gradient axis.",
+                )
+            })?;
+        gradient.axis = axis;
     }
     if let Some(color) = request.text_color.as_deref() {
         text_color = Some(parse_rgb_color(color)?);
@@ -2430,6 +2492,27 @@ fn element_appearance_dto(element: &Element, document: &Document) -> ElementAppe
     let (stroke_applicable, fill_applicable, text_color_applicable) =
         appearance_applicability(&element.kind);
     let (stroke, fill, text_color) = materialized_element_appearance(element, document);
+    let fallback_fill_color = Color::Rgba {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+    let displayed_fill_color = fill
+        .as_ref()
+        .map(|fill| fill.color)
+        .unwrap_or(fallback_fill_color);
+    let (fill_gradient_enabled, fill_gradient_end_color, fill_gradient_axis) = fill
+        .as_ref()
+        .and_then(|fill| fill.gradient.as_ref())
+        .map(|gradient| (true, color_to_hex(gradient.end_color), gradient.axis))
+        .unwrap_or_else(|| {
+            (
+                false,
+                color_to_hex(displayed_fill_color),
+                GradientAxis::AlongX,
+            )
+        });
     ElementAppearanceDto {
         stroke_applicable,
         stroke_enabled: stroke.is_some(),
@@ -2445,12 +2528,10 @@ fn element_appearance_dto(element: &Element, document: &Document) -> ElementAppe
             .unwrap_or(0.25),
         fill_applicable,
         fill_enabled: fill.is_some(),
-        fill_color: color_to_hex(fill.as_ref().map(|fill| fill.color).unwrap_or(Color::Rgba {
-            r: 255,
-            g: 255,
-            b: 255,
-            a: 255,
-        })),
+        fill_color: color_to_hex(displayed_fill_color),
+        fill_gradient_enabled,
+        fill_gradient_end_color,
+        fill_gradient_axis,
         text_color_applicable,
         text_color: color_to_hex(text_color.unwrap_or_else(default_black)),
     }
@@ -2481,6 +2562,13 @@ fn default_fill() -> FillStyle {
             a: 255,
         },
         gradient: None,
+    }
+}
+
+fn default_linear_gradient(start_color: Color) -> LinearGradient {
+    LinearGradient {
+        end_color: start_color,
+        axis: GradientAxis::AlongX,
     }
 }
 
