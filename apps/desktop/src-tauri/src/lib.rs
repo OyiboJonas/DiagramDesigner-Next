@@ -24,8 +24,8 @@ use next_domain::{
     AnchorSet, Color, Connection, Connector, ConnectorLabelStyle, Document, DocumentDefaults,
     DocumentId, Element, ElementId, ElementKind, Endpoint, FillStyle, GradientAxis, Layer, LayerId,
     LineStyle, LinearGradient, MarkerStyle, NextArtifact, NormalizedPoint, Page, PageId, Point,
-    Port, PortId, Rect, RichTextDocument, RichTextToken, Scene, ScriptPosition, Size, StrokeStyle,
-    StyleId, TextBlock, TextHorizontalAlignment, TextLayout, TextStyle, TextVerticalAlignment,
+    Port, PortId, Rect, RichTextDocument, RichTextToken, Scene, Size, StrokeStyle, StyleId,
+    TextBlock, TextHorizontalAlignment, TextLayout, TextStyle, TextVerticalAlignment,
 };
 use platform_fs::{AtomicSaveError, CommitMode, DurabilityLevel, atomic_save};
 use render_plan::{RenderPlanOptions, build_page_plan};
@@ -359,13 +359,8 @@ struct TextStyleDto {
     bold: bool,
     italic: bool,
     underline: bool,
-    strikeout: bool,
-    script: ScriptPosition,
-    overline: bool,
-    symbol_font: bool,
     font_family: Option<String>,
     font_size_pt: Option<u16>,
-    color: Option<Color>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1822,9 +1817,10 @@ fn update_element_properties(
                 "This rich-text element cannot be flattened safely by the basic text editor.",
             ));
         }
+        let baseline_style = common_style.unwrap_or_default();
         let next_style = match text_style {
-            Some(style) => text_style_from_dto(style)?,
-            None => common_style.unwrap_or_default(),
+            Some(style) => text_style_from_dto(baseline_style, style)?,
+            None => baseline_style,
         };
         let next_text = text.as_deref().unwrap_or(&preview);
         Some(Some(simple_text_block(
@@ -2688,39 +2684,30 @@ fn text_style_dto(style: TextStyle) -> TextStyleDto {
         bold: style.bold,
         italic: style.italic,
         underline: style.underline,
-        strikeout: style.strikeout,
-        script: style.script,
-        overline: style.overline,
-        symbol_font: style.symbol_font,
         font_family: style.font_family,
         font_size_pt: style.font_size_pt,
-        color: style.color,
     }
 }
 
-fn text_style_from_dto(style: TextStyleDto) -> Result<TextStyle, CommandError> {
+fn text_style_from_dto(
+    mut baseline: TextStyle,
+    style: TextStyleDto,
+) -> Result<TextStyle, CommandError> {
     if style.font_size_pt == Some(0) {
         return Err(CommandError::new(
             "invalid_text_font_size",
             "Text font size must be a positive whole number of points.",
         ));
     }
-    let font_family = style.font_family.and_then(|family| {
+    baseline.font_family = style.font_family.and_then(|family| {
         let trimmed = family.trim();
         (!trimmed.is_empty()).then(|| trimmed.to_owned())
     });
-    Ok(TextStyle {
-        bold: style.bold,
-        italic: style.italic,
-        underline: style.underline,
-        strikeout: style.strikeout,
-        script: style.script,
-        overline: style.overline,
-        symbol_font: style.symbol_font,
-        font_family,
-        font_size_pt: style.font_size_pt,
-        color: style.color,
-    })
+    baseline.font_size_pt = style.font_size_pt;
+    baseline.bold = style.bold;
+    baseline.italic = style.italic;
+    baseline.underline = style.underline;
+    Ok(baseline)
 }
 
 fn text_preview(block: &TextBlock) -> (String, bool, Option<TextStyle>) {
