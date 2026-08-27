@@ -12,7 +12,8 @@ use std::{
 };
 
 use app_core::{
-    ApplicationSession, ConnectorEndpointSide as AppConnectorEndpointSide,
+    ApplicationSession, ArrangeOperation as AppArrangeOperation,
+    ConnectorEndpointSide as AppConnectorEndpointSide,
     ConnectorEndpointState as AppConnectorEndpointState,
     ConnectorEndpoints as AppConnectorEndpoints, ConnectorGeometryKind as AppConnectorGeometryKind,
     ElementAppearanceUpdate, StructuralGroupCreation, ZOrderOperation as AppZOrderOperation,
@@ -264,6 +265,25 @@ enum ZOrderOperationRequest {
 #[serde(rename_all = "camelCase")]
 struct ReorderSelectionRequest {
     operation: ZOrderOperationRequest,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum ArrangeOperationRequest {
+    AlignLeft,
+    AlignHorizontalCenter,
+    AlignRight,
+    AlignTop,
+    AlignVerticalCenter,
+    AlignBottom,
+    DistributeHorizontal,
+    DistributeVertical,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ArrangeSelectionRequest {
+    operation: ArrangeOperationRequest,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1427,6 +1447,94 @@ fn reorder_selection(
         .session
         .reorder_elements(selected, operation)
         .map_err(|error| CommandError::new("arrange_failed", error.to_string()))?;
+    Ok(element_edit_result_dto(&document))
+}
+
+#[tauri::command]
+fn arrange_selection(
+    request: ArrangeSelectionRequest,
+    state: State<'_, DesktopState>,
+) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    let selected: Vec<_> = document
+        .session
+        .session()
+        .selection()
+        .iter()
+        .copied()
+        .collect();
+
+    {
+        let session = document.session.session();
+        let page_id = session.active_page_id().ok_or_else(|| {
+            CommandError::new(
+                "layout_no_active_page",
+                "Choose an active page before aligning or distributing elements.",
+            )
+        })?;
+        let layer_id = document.session.active_page_layer_id().ok_or_else(|| {
+            CommandError::new(
+                "layout_no_active_layer",
+                "Choose a page-local layer before aligning or distributing elements.",
+            )
+        })?;
+        let page = session
+            .document()
+            .pages
+            .iter()
+            .find(|page| page.id == page_id)
+            .ok_or_else(|| {
+                CommandError::new("layout_page_missing", "The active page no longer exists.")
+            })?;
+        let layer = page
+            .layers
+            .iter()
+            .find(|layer| layer.id == layer_id)
+            .ok_or_else(|| {
+                CommandError::new("layout_layer_missing", "The active layer no longer exists.")
+            })?;
+        if !layer.visible {
+            return Err(CommandError::new(
+                "layout_layer_hidden",
+                "Elements can be aligned or distributed only on a visible active layer.",
+            ));
+        }
+        if layer.locked {
+            return Err(CommandError::new(
+                "layout_layer_locked",
+                "Unlock the active layer before aligning or distributing elements.",
+            ));
+        }
+        if selected.iter().any(|element_id| {
+            !layer
+                .scene
+                .elements
+                .iter()
+                .any(|element| element.id == *element_id)
+        }) {
+            return Err(CommandError::new(
+                "layout_not_on_active_layer",
+                "Every selected element must belong to the active layer.",
+            ));
+        }
+    }
+
+    let operation = match request.operation {
+        ArrangeOperationRequest::AlignLeft => AppArrangeOperation::AlignLeft,
+        ArrangeOperationRequest::AlignHorizontalCenter => {
+            AppArrangeOperation::AlignHorizontalCenter
+        }
+        ArrangeOperationRequest::AlignRight => AppArrangeOperation::AlignRight,
+        ArrangeOperationRequest::AlignTop => AppArrangeOperation::AlignTop,
+        ArrangeOperationRequest::AlignVerticalCenter => AppArrangeOperation::AlignVerticalCenter,
+        ArrangeOperationRequest::AlignBottom => AppArrangeOperation::AlignBottom,
+        ArrangeOperationRequest::DistributeHorizontal => AppArrangeOperation::DistributeHorizontal,
+        ArrangeOperationRequest::DistributeVertical => AppArrangeOperation::DistributeVertical,
+    };
+    document
+        .session
+        .arrange_elements(selected, operation)
+        .map_err(|error| CommandError::new("layout_failed", error.to_string()))?;
     Ok(element_edit_result_dto(&document))
 }
 
@@ -2836,6 +2944,7 @@ pub fn run() {
             group_selection,
             ungroup_selection,
             reorder_selection,
+            arrange_selection,
             copy_selection,
             paste_selection,
             duplicate_selection,

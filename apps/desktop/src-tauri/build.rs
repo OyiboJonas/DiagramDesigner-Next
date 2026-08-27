@@ -30,6 +30,7 @@ fn main() {
             "group_selection",
             "ungroup_selection",
             "reorder_selection",
+            "arrange_selection",
             "copy_selection",
             "paste_selection",
             "duplicate_selection",

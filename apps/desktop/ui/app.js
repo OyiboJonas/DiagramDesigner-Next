@@ -3,6 +3,11 @@ import { createSvgSurface } from './svg-surface.mjs';
 import { buildRulerTicks } from './editor-interaction/snapping.mjs';
 import { isTextEditingTarget, resolveApplicationShortcut } from './editor-interaction/app-shortcuts.mjs';
 import { createZOrderRequest, isZOrderActionEnabled } from './editor-interaction/z-order-actions.mjs';
+import {
+  arrangeMinimumSelection,
+  createArrangeRequest,
+  isArrangeActionEnabled,
+} from './editor-interaction/arrange-actions.mjs';
 import { isGroupActionEnabled, isUngroupActionEnabled } from './editor-interaction/group-actions.mjs';
 import { isClipboardSelectionActionEnabled, isClipboardShortcutActionEnabled } from './editor-interaction/clipboard-actions.mjs';
 import {
@@ -29,6 +34,14 @@ const elements = {
   sendBackward: document.querySelector('#send-backward'),
   bringForward: document.querySelector('#bring-forward'),
   bringToFront: document.querySelector('#bring-to-front'),
+  alignLeft: document.querySelector('#align-left'),
+  alignHorizontalCenter: document.querySelector('#align-horizontal-center'),
+  alignRight: document.querySelector('#align-right'),
+  alignTop: document.querySelector('#align-top'),
+  alignVerticalCenter: document.querySelector('#align-vertical-center'),
+  alignBottom: document.querySelector('#align-bottom'),
+  distributeHorizontal: document.querySelector('#distribute-horizontal'),
+  distributeVertical: document.querySelector('#distribute-vertical'),
   groupSelection: document.querySelector('#group-selection'),
   ungroupSelection: document.querySelector('#ungroup-selection'),
   toggleGrid: document.querySelector('#toggle-grid'),
@@ -114,6 +127,17 @@ const zOrderButtons = [
   elements.bringForward,
   elements.bringToFront,
 ];
+const arrangeActionEntries = [
+  [elements.alignLeft, 'alignLeft', 'Align left edges'],
+  [elements.alignHorizontalCenter, 'alignHorizontalCenter', 'Align horizontal centers'],
+  [elements.alignRight, 'alignRight', 'Align right edges'],
+  [elements.alignTop, 'alignTop', 'Align top edges'],
+  [elements.alignVerticalCenter, 'alignVerticalCenter', 'Align vertical centers'],
+  [elements.alignBottom, 'alignBottom', 'Align bottom edges'],
+  [elements.distributeHorizontal, 'distributeHorizontal', 'Distribute horizontally'],
+  [elements.distributeVertical, 'distributeVertical', 'Distribute vertically'],
+];
+const arrangeButtons = arrangeActionEntries.map(([button]) => button);
 const groupingButtons = [elements.groupSelection, elements.ungroupSelection];
 
 const actionButtons = [
@@ -127,6 +151,7 @@ const actionButtons = [
   elements.pasteSelection,
   elements.duplicateSelection,
   ...zOrderButtons,
+  ...arrangeButtons,
   ...groupingButtons,
   elements.addRectangle,
   elements.addEllipse,
@@ -197,6 +222,7 @@ function setBusy(busy) {
   elements.pageSelect.disabled = busy;
   elements.layerSelect.disabled = busy;
   updateZOrderActionState();
+  updateArrangeActionState();
   updateGroupingActionState();
   if (!busy) {
     const selectionCount = Number(currentSelectionProperties?.count ?? 0);
@@ -258,6 +284,33 @@ function updateZOrderActionState() {
     button.disabled = !enabled;
     button.title = enabled ? enabledTitles[index] : reason;
   });
+}
+
+
+function updateArrangeActionState() {
+  const selectionCount = Number(currentSelectionProperties?.count ?? 0);
+  const activeLayer = activeLayerForZOrder();
+  for (const [button, operation, enabledTitle] of arrangeActionEntries) {
+    const minimum = arrangeMinimumSelection(operation);
+    const enabled = isArrangeActionEnabled({
+      operation,
+      selectionCount,
+      layerVisible: activeLayer?.visible === true,
+      layerLocked: activeLayer?.locked !== false,
+      busy: isBusy,
+    });
+    const reason = isBusy
+      ? 'Finish the current action first'
+      : selectionCount < minimum
+        ? `${minimum} or more selected logical objects required`
+        : !activeLayer?.visible
+          ? 'Show the active layer before aligning or distributing elements'
+          : activeLayer?.locked
+            ? 'Unlock the active layer before aligning or distributing elements'
+            : enabledTitle;
+    button.disabled = !enabled;
+    button.title = enabled ? enabledTitle : reason;
+  }
 }
 
 function updateGroupingActionState() {
@@ -363,6 +416,7 @@ function updateStructureDisabledState() {
   elements.applyPageProperties.disabled = isBusy || !activePage;
   elements.applyLayerProperties.disabled = isBusy || !activeLayer;
   updateZOrderActionState();
+  updateArrangeActionState();
 }
 
 function renderNavigation(navigation) {
@@ -559,6 +613,7 @@ function renderSelectionProperties(details) {
   elements.deleteSelection.disabled = count === 0;
   updateClipboardActionState();
   updateZOrderActionState();
+  updateArrangeActionState();
   updateGroupingActionState();
 
   const primary = details?.primary ?? null;
@@ -996,6 +1051,40 @@ async function reorderCurrentSelection(operation) {
   setBusy(true);
   try {
     const result = await invoke('reorder_selection', { request: createZOrderRequest(operation) });
+    renderState(result.state);
+    await refreshPresentation({ preserveSelection: true });
+    const selection = result.selectedElementIds ?? svgSurface.selectedElementIds;
+    svgSurface.setSelection(selection);
+    keyboardSurface?.syncSelectionState(selection);
+    await refreshSelectionProperties();
+    scheduleRecoverySync(250);
+    setStatus(labels[operation]);
+  } catch (error) {
+    setStatus(formatInvokeError(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
+
+async function arrangeCurrentSelection(operation) {
+  const minimum = arrangeMinimumSelection(operation);
+  if (!invoke || Number(currentSelectionProperties?.count ?? 0) < minimum) {
+    return;
+  }
+  const labels = {
+    alignLeft: 'Selection aligned left',
+    alignHorizontalCenter: 'Selection centers aligned horizontally',
+    alignRight: 'Selection aligned right',
+    alignTop: 'Selection aligned top',
+    alignVerticalCenter: 'Selection centers aligned vertically',
+    alignBottom: 'Selection aligned bottom',
+    distributeHorizontal: 'Selection distributed horizontally',
+    distributeVertical: 'Selection distributed vertically',
+  };
+  setBusy(true);
+  try {
+    const result = await invoke('arrange_selection', { request: createArrangeRequest(operation) });
     renderState(result.state);
     await refreshPresentation({ preserveSelection: true });
     const selection = result.selectedElementIds ?? svgSurface.selectedElementIds;
@@ -1544,6 +1633,12 @@ elements.bringForward.addEventListener('click', () => {
 elements.bringToFront.addEventListener('click', () => {
   void reorderCurrentSelection('bringToFront');
 });
+
+for (const [button, operation] of arrangeActionEntries) {
+  button.addEventListener('click', () => {
+    void arrangeCurrentSelection(operation);
+  });
+}
 
 elements.groupSelection.addEventListener('click', () => {
   void groupCurrentSelection();
