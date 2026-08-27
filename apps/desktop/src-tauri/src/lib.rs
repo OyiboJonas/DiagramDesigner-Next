@@ -1869,7 +1869,8 @@ fn update_element_properties(
         };
 
         if let Some(layout_update) = text_layout {
-            next_text_block.layout = apply_text_layout_update(next_text_block.layout, layout_update)?;
+            next_text_block.layout =
+                apply_text_layout_update(next_text_block.layout, layout_update)?;
         }
         Some(Some(next_text_block))
     } else {
@@ -2506,7 +2507,12 @@ fn element_properties_dto(
         Some(block) => {
             let (preview, editable, common_style) = text_preview(block);
             let style = editable.then(|| text_style_dto(common_style.unwrap_or_default()));
-            (Some(preview), editable, style, Some(text_layout_dto(block.layout)))
+            (
+                Some(preview),
+                editable,
+                style,
+                Some(text_layout_dto(block.layout)),
+            )
         }
         None => (None, false, None, None),
     };
