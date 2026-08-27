@@ -103,12 +103,14 @@ fn horizontal_distribution_uses_the_farthest_trailing_edge_as_the_opposite_ancho
         },
     ]);
 
-    assert!(session
-        .execute(EditCommand::ArrangeElements {
-            element_ids: vec![ids[2], ids[0], ids[1]],
-            operation: ArrangeOperation::DistributeHorizontal,
-        })
-        .unwrap());
+    assert!(
+        session
+            .execute(EditCommand::ArrangeElements {
+                element_ids: vec![ids[2], ids[0], ids[1]],
+                operation: ArrangeOperation::DistributeHorizontal,
+            })
+            .unwrap()
+    );
 
     // The true left and right visual anchors stay fixed even though the right
     // anchor starts before the third object's leading edge.
@@ -116,10 +118,10 @@ fn horizontal_distribution_uses_the_farthest_trailing_edge_as_the_opposite_ancho
     assert_eq!(bounds(&session, ids[1]).x, 30.0);
     assert_eq!(bounds(&session, ids[2]).x, 15.0);
 
-    let first_gap = bounds(&session, ids[2]).x
-        - (bounds(&session, ids[0]).x + bounds(&session, ids[0]).width);
-    let second_gap = bounds(&session, ids[1]).x
-        - (bounds(&session, ids[2]).x + bounds(&session, ids[2]).width);
+    let first_gap =
+        bounds(&session, ids[2]).x - (bounds(&session, ids[0]).x + bounds(&session, ids[0]).width);
+    let second_gap =
+        bounds(&session, ids[1]).x - (bounds(&session, ids[2]).x + bounds(&session, ids[2]).width);
     assert!((first_gap - 5.0).abs() < 1e-9);
     assert!((second_gap - 5.0).abs() < 1e-9);
 }
@@ -147,21 +149,23 @@ fn vertical_distribution_uses_the_farthest_trailing_edge_as_the_opposite_anchor(
         },
     ]);
 
-    assert!(session
-        .execute(EditCommand::ArrangeElements {
-            element_ids: vec![ids[1], ids[2], ids[0]],
-            operation: ArrangeOperation::DistributeVertical,
-        })
-        .unwrap());
+    assert!(
+        session
+            .execute(EditCommand::ArrangeElements {
+                element_ids: vec![ids[1], ids[2], ids[0]],
+                operation: ArrangeOperation::DistributeVertical,
+            })
+            .unwrap()
+    );
 
     assert_eq!(bounds(&session, ids[0]).y, 0.0);
     assert_eq!(bounds(&session, ids[1]).y, 30.0);
     assert_eq!(bounds(&session, ids[2]).y, 15.0);
 
-    let first_gap = bounds(&session, ids[2]).y
-        - (bounds(&session, ids[0]).y + bounds(&session, ids[0]).height);
-    let second_gap = bounds(&session, ids[1]).y
-        - (bounds(&session, ids[2]).y + bounds(&session, ids[2]).height);
+    let first_gap =
+        bounds(&session, ids[2]).y - (bounds(&session, ids[0]).y + bounds(&session, ids[0]).height);
+    let second_gap =
+        bounds(&session, ids[1]).y - (bounds(&session, ids[2]).y + bounds(&session, ids[2]).height);
     assert!((first_gap - 5.0).abs() < 1e-9);
     assert!((second_gap - 5.0).abs() < 1e-9);
 }
@@ -189,21 +193,23 @@ fn contained_selection_keeps_distinct_anchors_and_represents_overlap_as_equal_ne
         },
     ]);
 
-    assert!(session
-        .execute(EditCommand::ArrangeElements {
-            element_ids: vec![ids[2], ids[1], ids[0]],
-            operation: ArrangeOperation::DistributeHorizontal,
-        })
-        .unwrap());
+    assert!(
+        session
+            .execute(EditCommand::ArrangeElements {
+                element_ids: vec![ids[2], ids[1], ids[0]],
+                operation: ArrangeOperation::DistributeHorizontal,
+            })
+            .unwrap()
+    );
 
     assert_eq!(bounds(&session, ids[0]).x, 0.0);
     assert_eq!(bounds(&session, ids[2]).x, 100.0);
     assert_eq!(bounds(&session, ids[1]).x, 140.0);
 
-    let first_overlap = bounds(&session, ids[1]).x
-        - (bounds(&session, ids[0]).x + bounds(&session, ids[0]).width);
-    let second_overlap = bounds(&session, ids[2]).x
-        - (bounds(&session, ids[1]).x + bounds(&session, ids[1]).width);
+    let first_overlap =
+        bounds(&session, ids[1]).x - (bounds(&session, ids[0]).x + bounds(&session, ids[0]).width);
+    let second_overlap =
+        bounds(&session, ids[2]).x - (bounds(&session, ids[1]).x + bounds(&session, ids[1]).width);
     assert!((first_overlap + 60.0).abs() < 1e-9);
     assert!((second_overlap + 60.0).abs() < 1e-9);
 }
