@@ -10,13 +10,8 @@ const baselineStyle = Object.freeze({
   bold: false,
   italic: false,
   underline: false,
-  strikeout: true,
-  script: 'superscript',
-  overline: true,
-  symbolFont: false,
   fontFamily: null,
   fontSizePt: null,
-  color: { kind: 'system_palette', index: 9 },
 });
 
 function controls(overrides = {}) {
@@ -49,23 +44,37 @@ test('text and exposed formatting can change together', () => {
     }),
   );
   assert.equal(update.text, 'Beta');
-  assert.equal(update.textStyle.fontFamily, 'Inter');
-  assert.equal(update.textStyle.fontSizePt, 14);
-  assert.equal(update.textStyle.bold, true);
-  assert.equal(update.textStyle.italic, true);
-  assert.equal(update.textStyle.underline, true);
+  assert.deepEqual(update.textStyle, {
+    fontFamily: 'Inter',
+    fontSizePt: 14,
+    bold: true,
+    italic: true,
+    underline: true,
+  });
 });
 
-test('unexposed rich-text style fields and imported colour remain untouched', () => {
-  const update = buildUniformTextUpdate(controls({ bold: true }));
-  assert.deepEqual(update.textStyle, {
+test('unexposed rich-text style fields never cross the formatting IPC request', () => {
+  const richBaseline = {
     ...baselineStyle,
+    strikeout: true,
+    script: 'superscript',
+    overline: true,
+    symbolFont: true,
+    color: { kind: 'system_palette', index: 9 },
+  };
+  const update = buildUniformTextUpdate(
+    controls({ baselineStyle: richBaseline, bold: true }),
+  );
+  assert.deepEqual(update.textStyle, {
+    fontFamily: null,
+    fontSizePt: null,
     bold: true,
+    italic: false,
+    underline: false,
   });
-  assert.deepEqual(update.textStyle.color, { kind: 'system_palette', index: 9 });
-  assert.equal(update.textStyle.strikeout, true);
-  assert.equal(update.textStyle.script, 'superscript');
-  assert.equal(update.textStyle.overline, true);
+  for (const key of ['strikeout', 'script', 'overline', 'symbolFont', 'color']) {
+    assert.equal(Object.hasOwn(update.textStyle, key), false);
+  }
 });
 
 test('blank family and size retain or restore document-default semantics', () => {
