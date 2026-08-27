@@ -21,6 +21,7 @@ import {
   appearanceControlState,
   buildAppearanceRequest,
 } from './editor-interaction/appearance-actions.mjs';
+import { buildUniformTextUpdate } from './editor-interaction/text-formatting-actions.mjs';
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -95,6 +96,12 @@ const elements = {
   propertyTextField: document.querySelector('#property-text-field'),
   propertyText: document.querySelector('#property-text'),
   propertyTextNote: document.querySelector('#property-text-note'),
+  propertyTextFormatting: document.querySelector('#property-text-formatting'),
+  propertyTextFontFamily: document.querySelector('#property-text-font-family'),
+  propertyTextFontSize: document.querySelector('#property-text-font-size'),
+  propertyTextBold: document.querySelector('#property-text-bold'),
+  propertyTextItalic: document.querySelector('#property-text-italic'),
+  propertyTextUnderline: document.querySelector('#property-text-underline'),
   applyProperties: document.querySelector('#apply-properties'),
   connectorStyleForm: document.querySelector('#connector-style-form'),
   connectorStartMarker: document.querySelector('#connector-start-marker'),
@@ -674,8 +681,10 @@ function renderSelectionProperties(details) {
   elements.propertyGeometryNote.hidden = geometryEditable;
 
   const hasText = primary.text !== null && primary.text !== undefined;
+  const editableTextStyle = primary.textEditable === true ? primary.textStyle ?? null : null;
   elements.propertyTextField.hidden = !hasText;
   elements.propertyTextNote.hidden = !hasText || primary.textEditable;
+  elements.propertyTextFormatting.hidden = !editableTextStyle;
   renderConnectorStyle(primary.connector);
   renderAppearance(primary.appearance);
 
@@ -686,6 +695,16 @@ function renderSelectionProperties(details) {
       elements.propertyTextNote.textContent =
         'Rich text is shown for reference; this basic editor will not flatten mixed formatting or dynamic fields.';
     }
+  }
+  if (editableTextStyle) {
+    elements.propertyTextFontFamily.value = editableTextStyle.fontFamily ?? '';
+    elements.propertyTextFontSize.value =
+      editableTextStyle.fontSizePt === null || editableTextStyle.fontSizePt === undefined
+        ? ''
+        : String(editableTextStyle.fontSizePt);
+    elements.propertyTextBold.checked = editableTextStyle.bold === true;
+    elements.propertyTextItalic.checked = editableTextStyle.italic === true;
+    elements.propertyTextUnderline.checked = editableTextStyle.underline === true;
   }
 }
 
@@ -1189,7 +1208,24 @@ async function applyElementProperties(event) {
     rotationDeg: numbers.rotation,
   };
   if (primary.textEditable) {
-    request.text = elements.propertyText.value;
+    try {
+      Object.assign(
+        request,
+        buildUniformTextUpdate({
+          baselineText: primary.text,
+          baselineStyle: primary.textStyle,
+          text: elements.propertyText.value,
+          fontFamily: elements.propertyTextFontFamily.value,
+          fontSizePt: elements.propertyTextFontSize.value,
+          bold: elements.propertyTextBold.checked,
+          italic: elements.propertyTextItalic.checked,
+          underline: elements.propertyTextUnderline.checked,
+        }),
+      );
+    } catch (error) {
+      setStatus(String(error?.message ?? error));
+      return;
+    }
   }
 
   setBusy(true);
