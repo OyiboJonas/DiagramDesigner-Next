@@ -32,11 +32,11 @@ jobs:
       - name: Editor core tests
         run: cargo test --locked -p editor-core
       - name: Application core arrange tests
-        run: cargo test --locked --manifest-path crates/app-core/Cargo.toml --test arrange_application
+        run: cargo test --manifest-path crates/app-core/Cargo.toml --test arrange_application
       - name: Application core tests
-        run: cargo test --locked --manifest-path crates/app-core/Cargo.toml
+        run: cargo test --manifest-path crates/app-core/Cargo.toml
       - name: Application core Clippy
-        run: cargo clippy --locked --manifest-path crates/app-core/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --manifest-path crates/app-core/Cargo.toml --all-targets -- -D warnings
       - name: Workspace Clippy
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Diff check
