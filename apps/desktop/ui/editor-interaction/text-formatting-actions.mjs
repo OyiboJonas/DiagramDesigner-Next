@@ -5,11 +5,11 @@ export class TextFormattingContractError extends Error {
   }
 }
 
-function cloneStyle(style) {
+function requireStyle(style) {
   if (!style || typeof style !== 'object' || Array.isArray(style)) {
     throw new TextFormattingContractError('editable text must provide a common style baseline');
   }
-  return JSON.parse(JSON.stringify(style));
+  return style;
 }
 
 function normalizeFontFamily(value) {
@@ -28,13 +28,23 @@ function normalizeFontSize(value) {
   return size;
 }
 
+function exposedStyle(style) {
+  const baseline = requireStyle(style);
+  return {
+    fontFamily: baseline.fontFamily ?? null,
+    fontSizePt: baseline.fontSizePt ?? null,
+    bold: baseline.bold === true,
+    italic: baseline.italic === true,
+    underline: baseline.underline === true,
+  };
+}
+
 /**
  * Build only the semantic text fields that actually changed.
  *
- * The complete common TextStyle baseline is cloned before the five controls in
- * this first formatting slice are changed. This deliberately preserves imported
- * strikeout/script/overline/symbol-font/colour semantics that are not exposed by
- * the current UI.
+ * The IPC formatting payload contains only the five controls implemented by this
+ * slice. Unexposed rich-text semantics never cross back from the WebView and are
+ * preserved by the Rust boundary from the canonical common TextStyle baseline.
  */
 export function buildUniformTextUpdate({
   baselineText,
@@ -52,14 +62,16 @@ export function buildUniformTextUpdate({
     update.text = nextText;
   }
 
-  const nextStyle = cloneStyle(baselineStyle);
-  nextStyle.fontFamily = normalizeFontFamily(fontFamily);
-  nextStyle.fontSizePt = normalizeFontSize(fontSizePt);
-  nextStyle.bold = bold === true;
-  nextStyle.italic = italic === true;
-  nextStyle.underline = underline === true;
+  const previousStyle = exposedStyle(baselineStyle);
+  const nextStyle = {
+    fontFamily: normalizeFontFamily(fontFamily),
+    fontSizePt: normalizeFontSize(fontSizePt),
+    bold: bold === true,
+    italic: italic === true,
+    underline: underline === true,
+  };
 
-  if (JSON.stringify(nextStyle) !== JSON.stringify(baselineStyle)) {
+  if (JSON.stringify(nextStyle) !== JSON.stringify(previousStyle)) {
     update.textStyle = nextStyle;
   }
   return update;
