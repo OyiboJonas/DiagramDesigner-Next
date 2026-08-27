@@ -26,7 +26,8 @@ The `0.1.0-alpha.1` version label is still used while the native alpha smoke gat
 - align left/center/right/top/middle/bottom plus horizontal/vertical distribution for logical multi-selection, including structural groups;
 - explicit Save As with `Ctrl/Cmd+Shift+S`, plus native confirmation before a newly selected existing `.ddnx` destination is replaced;
 - connector start/end marker and line-style editing for straight and orthogonal connectors, including preservation of imported custom legacy style codes until explicitly replaced;
-- linear shape fill gradients with independent start/end colours and horizontal/vertical direction, using the existing one-step appearance history and DDNX style model.
+- linear shape fill gradients with independent start/end colours and horizontal/vertical direction, using the existing one-step appearance history and DDNX style model;
+- uniform text formatting for safely editable text blocks: font family, whole-point font size, bold, italic and underline, committed atomically with text edits while preserving all unexposed `TextStyle` fields.
 
 These additions are covered by repository, frontend, DDNX and Windows/Tauri automation. They do **not** replace the outstanding human Windows GUI smoke required by the alpha-readiness gate, so the native smoke path below remains focused on the original alpha baseline.
 
@@ -62,7 +63,7 @@ If that recovery checkpoint cannot be written, the close request is blocked and 
 - Windows only for this alpha; no installer and no code signing.
 - Legacy `.ddd`/`.ddt` support is import-only. DiagramDesigner Next never writes those formats.
 - Rich/mixed legacy text can be displayed but the basic text field deliberately refuses destructive flattening of unsupported formatting or dynamic fields.
-- Basic appearance covers shape stroke/fill including linear gradients, text colour, and standard connector markers/line styles. Advanced text formatting and direct editing of arbitrary custom legacy connector style codes remain outside the current controls.
+- Basic appearance covers shape stroke/fill including linear gradients, text colour, and standard connector markers/line styles. Uniform simple-text family/size/bold/italic/underline are editable; mixed/run-level rich-text formatting and direct editing of arbitrary custom legacy connector style codes remain outside the current controls.
 - The executable depends on the Windows WebView2 runtime, normally present on current Windows 10/11 systems.
 
 ## Failure information

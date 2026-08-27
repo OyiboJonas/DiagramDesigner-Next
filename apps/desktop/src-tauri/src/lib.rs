@@ -350,6 +350,17 @@ struct UpdateElementPropertiesRequest {
     bounds_mm: Rect,
     rotation_deg: f64,
     text: Option<String>,
+    text_style: Option<TextStyleDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TextStyleDto {
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    font_family: Option<String>,
+    font_size_pt: Option<u16>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -411,6 +422,7 @@ struct ElementPropertiesDto {
     rotation_deg: f64,
     text: Option<String>,
     text_editable: bool,
+    text_style: Option<TextStyleDto>,
     geometry_editable: bool,
     appearance: ElementAppearanceDto,
     connector: Option<ConnectorPropertiesDto>,
@@ -1762,9 +1774,16 @@ fn update_element_properties(
     request: UpdateElementPropertiesRequest,
     state: State<'_, DesktopState>,
 ) -> Result<ElementEditResultDto, CommandError> {
+    let UpdateElementPropertiesRequest {
+        element_id,
+        bounds_mm,
+        rotation_deg,
+        text,
+        text_style,
+    } = request;
     let mut document = lock_document(&state)?;
-    let existing = find_element(document.session.session().document(), request.element_id)
-        .ok_or_else(|| {
+    let existing =
+        find_element(document.session.session().document(), element_id).ok_or_else(|| {
             CommandError::new(
                 "element_properties_missing",
                 "The selected element no longer exists in the current document.",
@@ -1776,9 +1795,10 @@ fn update_element_properties(
             "This element uses a dedicated geometry tool and cannot be resized in the basic inspector.",
         ));
     }
-    let text_update = if let Some(text) = request.text {
-        let existing = find_element(document.session.session().document(), request.element_id)
-            .ok_or_else(|| {
+
+    let text_update = if text.is_some() || text_style.is_some() {
+        let existing =
+            find_element(document.session.session().document(), element_id).ok_or_else(|| {
                 CommandError::new(
                     "element_properties_missing",
                     "The selected element no longer exists in the current document.",
@@ -1790,16 +1810,22 @@ fn update_element_properties(
                 "This element does not contain editable text.",
             ));
         };
-        let (_, editable, common_style) = text_preview(existing_text);
+        let (preview, editable, common_style) = text_preview(existing_text);
         if !editable {
             return Err(CommandError::new(
                 "element_text_not_editable",
                 "This rich-text element cannot be flattened safely by the basic text editor.",
             ));
         }
+        let baseline_style = common_style.unwrap_or_default();
+        let next_style = match text_style {
+            Some(style) => text_style_from_dto(baseline_style, style)?,
+            None => baseline_style,
+        };
+        let next_text = text.as_deref().unwrap_or(&preview);
         Some(Some(simple_text_block(
-            &text,
-            common_style.unwrap_or_default(),
+            next_text,
+            next_style,
             Some(existing_text.layout),
         )))
     } else {
@@ -1808,12 +1834,7 @@ fn update_element_properties(
 
     document
         .session
-        .commit_element_properties(
-            request.element_id,
-            request.bounds_mm,
-            request.rotation_deg,
-            text_update,
-        )
+        .commit_element_properties(element_id, bounds_mm, rotation_deg, text_update)
         .map_err(|error| CommandError::new("element_properties_failed", error.to_string()))?;
     Ok(element_edit_result_dto(&document))
 }
@@ -2437,12 +2458,13 @@ fn element_properties_dto(
     connector: Option<AppConnectorEndpoints>,
     document: &Document,
 ) -> ElementPropertiesDto {
-    let (text, text_editable) = match element.text.as_ref() {
+    let (text, text_editable, text_style) = match element.text.as_ref() {
         Some(block) => {
-            let (preview, editable, _) = text_preview(block);
-            (Some(preview), editable)
+            let (preview, editable, common_style) = text_preview(block);
+            let style = editable.then(|| text_style_dto(common_style.unwrap_or_default()));
+            (Some(preview), editable, style)
         }
-        None => (None, false),
+        None => (None, false, None),
     };
     ElementPropertiesDto {
         element_id: element.id,
@@ -2452,6 +2474,7 @@ fn element_properties_dto(
         rotation_deg: element.rotation_deg,
         text,
         text_editable,
+        text_style,
         geometry_editable: element_geometry_editable(&element.kind),
         appearance: element_appearance_dto(element, document),
         connector: connector.and_then(connector_properties_dto),
@@ -2654,6 +2677,37 @@ fn element_type_name(kind: &ElementKind) -> &'static str {
         ElementKind::Curve { .. } => "Curve",
         ElementKind::LayerReference { .. } => "Layer reference",
     }
+}
+
+fn text_style_dto(style: TextStyle) -> TextStyleDto {
+    TextStyleDto {
+        bold: style.bold,
+        italic: style.italic,
+        underline: style.underline,
+        font_family: style.font_family,
+        font_size_pt: style.font_size_pt,
+    }
+}
+
+fn text_style_from_dto(
+    mut baseline: TextStyle,
+    style: TextStyleDto,
+) -> Result<TextStyle, CommandError> {
+    if style.font_size_pt == Some(0) {
+        return Err(CommandError::new(
+            "invalid_text_font_size",
+            "Text font size must be a positive whole number of points.",
+        ));
+    }
+    baseline.font_family = style.font_family.and_then(|family| {
+        let trimmed = family.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    });
+    baseline.font_size_pt = style.font_size_pt;
+    baseline.bold = style.bold;
+    baseline.italic = style.italic;
+    baseline.underline = style.underline;
+    Ok(baseline)
 }
 
 fn text_preview(block: &TextBlock) -> (String, bool, Option<TextStyle>) {

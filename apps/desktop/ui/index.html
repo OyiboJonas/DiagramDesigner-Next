@@ -173,6 +173,26 @@
                 <textarea id="property-text" rows="4"></textarea>
               </label>
               <p id="property-text-note" class="property-note" hidden></p>
+              <section id="property-text-formatting" class="text-formatting-section" aria-label="Uniform text formatting" hidden>
+                <div class="text-formatting-heading">
+                  <strong>Text formatting</strong>
+                  <span>uniform block</span>
+                </div>
+                <div class="text-formatting-grid">
+                  <label class="property-field">Font family
+                    <input id="property-text-font-family" type="text" placeholder="Document default" />
+                  </label>
+                  <label class="property-field">Size (pt)
+                    <input id="property-text-font-size" type="number" min="1" max="65535" step="1" placeholder="Default" />
+                  </label>
+                </div>
+                <div class="text-formatting-toggles" role="group" aria-label="Text emphasis">
+                  <label><input id="property-text-bold" type="checkbox" /> Bold</label>
+                  <label><input id="property-text-italic" type="checkbox" /> Italic</label>
+                  <label><input id="property-text-underline" type="checkbox" /> Underline</label>
+                </div>
+                <p class="property-note">Blank family or size uses the document default. Other imported text-style semantics are preserved.</p>
+              </section>
               <button id="apply-properties" class="primary" type="submit">Apply properties</button>
             </form>
 

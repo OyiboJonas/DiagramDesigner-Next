@@ -711,6 +711,7 @@ button.toggle-button[aria-pressed="true"] {
 
 .property-grid input,
 .property-field input,
+.property-field select,
 .property-field textarea {
   width: 100%;
   box-sizing: border-box;
@@ -724,6 +725,55 @@ button.toggle-button[aria-pressed="true"] {
 .property-note {
   margin: 0;
   line-height: 1.35;
+}
+
+.text-formatting-section {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+}
+
+.text-formatting-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 0.78rem;
+}
+
+.text-formatting-heading span {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.text-formatting-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 8px;
+}
+
+.text-formatting-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 9px 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.text-formatting-toggles label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.text-formatting-toggles input {
+  width: auto !important;
+  min-height: auto !important;
+  margin: 0;
+  padding: 0 !important;
 }
 
 .document-structure {
@@ -749,6 +799,7 @@ button.toggle-button[aria-pressed="true"] {
 .document-structure select,
 .document-structure input,
 .selection-inspector input,
+.selection-inspector select,
 .selection-inspector textarea {
   width: 100%;
   min-width: 0;
@@ -762,7 +813,8 @@ button.toggle-button[aria-pressed="true"] {
 
 .document-structure select,
 .document-structure input,
-.selection-inspector input {
+.selection-inspector input,
+.selection-inspector select {
   min-height: 32px;
   padding: 0 8px;
 }
@@ -770,6 +822,7 @@ button.toggle-button[aria-pressed="true"] {
 .document-structure select:focus-visible,
 .document-structure input:focus-visible,
 .selection-inspector input:focus-visible,
+.selection-inspector select:focus-visible,
 .selection-inspector textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
