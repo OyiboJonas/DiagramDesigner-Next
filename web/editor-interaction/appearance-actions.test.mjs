@@ -128,6 +128,7 @@ test('disabling the gradient preserves fill while disabling fill ignores gradien
       controls({
         baseline: gradientBaseline,
         fillEnabled: false,
+        fillColor: '#123456',
         fillGradientEnabled: false,
         fillGradientEndColor: '#abcdef',
         fillGradientAxis: 'along_y',
@@ -136,6 +137,22 @@ test('disabling the gradient preserves fill while disabling fill ignores gradien
     {
       elementId: 'element-1',
       fillEnabled: false,
+    },
+  );
+});
+
+test('disabling stroke ignores stale detail fields instead of recreating stroke', () => {
+  assert.deepEqual(
+    buildAppearanceRequest(
+      controls({
+        strokeEnabled: false,
+        strokeColor: '#abcdef',
+        strokeWidthMm: 0,
+      }),
+    ),
+    {
+      elementId: 'element-1',
+      strokeEnabled: false,
     },
   );
 });
