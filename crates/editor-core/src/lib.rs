@@ -70,6 +70,27 @@ pub enum ZOrderOperation {
     SendBackward,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrangeOperation {
+    AlignLeft,
+    AlignHorizontalCenter,
+    AlignRight,
+    AlignTop,
+    AlignVerticalCenter,
+    AlignBottom,
+    DistributeHorizontal,
+    DistributeVertical,
+}
+
+impl ArrangeOperation {
+    fn minimum_selection(self) -> usize {
+        match self {
+            Self::DistributeHorizontal | Self::DistributeVertical => 3,
+            _ => 2,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConnectorEndpointSnapshot {
     pub kind: ConnectorGeometryKind,
@@ -120,6 +141,13 @@ pub enum EditCommand {
     MoveElements {
         element_ids: Vec<ElementId>,
         delta_mm: Point,
+    },
+    /// Align or distribute direct scene roots from canonical document geometry.
+    /// Structural groups participate as one logical object and are expanded only
+    /// when the computed movement is committed.
+    ArrangeElements {
+        element_ids: Vec<ElementId>,
+        operation: ArrangeOperation,
     },
     ReorderElements {
         element_ids: Vec<ElementId>,
@@ -436,6 +464,12 @@ pub enum EditorError {
     ZOrderDifferentLayers,
     #[error("z-order editing currently requires top-level element {0:?}")]
     ZOrderRequiresTopLevelElement(ElementId),
+    #[error("arrange selection spans more than one layer")]
+    ArrangeDifferentLayers,
+    #[error("arrange editing currently requires top-level element {0:?}")]
+    ArrangeRequiresTopLevelElement(ElementId),
+    #[error("arrange operation requires at least {required} elements; got {actual}")]
+    ArrangeRequiresAtLeast { required: usize, actual: usize },
     #[error("z-order index {index} is outside 0..={len}")]
     InvalidZOrderIndex { index: usize, len: usize },
     #[error("non-empty group creation requires the dedicated grouping command")]
@@ -527,6 +561,9 @@ enum UndoStep {
     MoveElements {
         element_ids: Vec<ElementId>,
         delta_mm: Point,
+    },
+    ArrangeElements {
+        movements: Vec<(Vec<ElementId>, Point)>,
     },
     RestoreZOrder {
         target: LayerTarget,
@@ -1093,6 +1130,10 @@ fn apply_command(
             element_ids,
             delta_mm,
         } => apply_move(document, element_ids, *delta_mm),
+        EditCommand::ArrangeElements {
+            element_ids,
+            operation,
+        } => apply_arrange_elements(document, element_ids, *operation),
         EditCommand::ReorderElements {
             element_ids,
             operation,
@@ -1375,6 +1416,238 @@ fn apply_move(
                 x: -delta_mm.x,
                 y: -delta_mm.y,
             },
+        },
+        structural: false,
+    }))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ArrangeItem {
+    element_id: ElementId,
+    bounds: Rect,
+}
+
+fn apply_arrange_elements(
+    document: &mut Document,
+    element_ids: &[ElementId],
+    operation: ArrangeOperation,
+) -> Result<Option<AppliedCommand>, EditorError> {
+    let required = operation.minimum_selection();
+    if element_ids.len() < required {
+        return Err(EditorError::ArrangeRequiresAtLeast {
+            required,
+            actual: element_ids.len(),
+        });
+    }
+
+    let mut selected = BTreeSet::new();
+    let mut target = None;
+    for element_id in element_ids {
+        if !selected.insert(*element_id) {
+            return Err(EditorError::DuplicateCommandElement(*element_id));
+        }
+        ensure_element_editable(document, *element_id)?;
+        let element_target = layer_target_for_element(document, *element_id)
+            .ok_or(EditorError::ElementNotFound(*element_id))?;
+        if target.is_some_and(|existing| existing != element_target) {
+            return Err(EditorError::ArrangeDifferentLayers);
+        }
+        target = Some(element_target);
+    }
+
+    let target = target.expect("minimum arrange selection has a target layer");
+    let layer =
+        find_layer(document, target).ok_or(EditorError::LayerNotFound(layer_id_of(target)))?;
+    for element_id in &selected {
+        if layer
+            .scene
+            .roots
+            .iter()
+            .filter(|root| **root == *element_id)
+            .count()
+            != 1
+        {
+            return Err(EditorError::ArrangeRequiresTopLevelElement(*element_id));
+        }
+    }
+
+    let mut items = Vec::with_capacity(selected.len());
+    for element_id in selected {
+        let mut recursion_stack = BTreeSet::new();
+        let bounds = subtree_visual_bounds(&layer.scene, element_id, &mut recursion_stack)?;
+        items.push(ArrangeItem { element_id, bounds });
+    }
+
+    let left = items
+        .iter()
+        .map(|item| item.bounds.x)
+        .fold(f64::INFINITY, f64::min);
+    let top = items
+        .iter()
+        .map(|item| item.bounds.y)
+        .fold(f64::INFINITY, f64::min);
+    let right = items
+        .iter()
+        .map(|item| item.bounds.x + item.bounds.width)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let bottom = items
+        .iter()
+        .map(|item| item.bounds.y + item.bounds.height)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let horizontal_center = (left + right) / 2.0;
+    let vertical_center = (top + bottom) / 2.0;
+
+    let mut logical_movements: Vec<(ElementId, Point)> = Vec::new();
+    match operation {
+        ArrangeOperation::AlignLeft => {
+            logical_movements.extend(items.iter().map(|item| {
+                (
+                    item.element_id,
+                    Point {
+                        x: left - item.bounds.x,
+                        y: 0.0,
+                    },
+                )
+            }));
+        }
+        ArrangeOperation::AlignHorizontalCenter => {
+            logical_movements.extend(items.iter().map(|item| {
+                (
+                    item.element_id,
+                    Point {
+                        x: horizontal_center - (item.bounds.x + item.bounds.width / 2.0),
+                        y: 0.0,
+                    },
+                )
+            }));
+        }
+        ArrangeOperation::AlignRight => {
+            logical_movements.extend(items.iter().map(|item| {
+                (
+                    item.element_id,
+                    Point {
+                        x: right - (item.bounds.x + item.bounds.width),
+                        y: 0.0,
+                    },
+                )
+            }));
+        }
+        ArrangeOperation::AlignTop => {
+            logical_movements.extend(items.iter().map(|item| {
+                (
+                    item.element_id,
+                    Point {
+                        x: 0.0,
+                        y: top - item.bounds.y,
+                    },
+                )
+            }));
+        }
+        ArrangeOperation::AlignVerticalCenter => {
+            logical_movements.extend(items.iter().map(|item| {
+                (
+                    item.element_id,
+                    Point {
+                        x: 0.0,
+                        y: vertical_center - (item.bounds.y + item.bounds.height / 2.0),
+                    },
+                )
+            }));
+        }
+        ArrangeOperation::AlignBottom => {
+            logical_movements.extend(items.iter().map(|item| {
+                (
+                    item.element_id,
+                    Point {
+                        x: 0.0,
+                        y: bottom - (item.bounds.y + item.bounds.height),
+                    },
+                )
+            }));
+        }
+        ArrangeOperation::DistributeHorizontal => {
+            items.sort_by(|a, b| {
+                a.bounds
+                    .x
+                    .total_cmp(&b.bounds.x)
+                    .then_with(|| a.element_id.cmp(&b.element_id))
+            });
+            let first_left = items[0].bounds.x;
+            let last_right = items.last().expect("distribution has items").bounds.x
+                + items.last().expect("distribution has items").bounds.width;
+            let total_width: f64 = items.iter().map(|item| item.bounds.width).sum();
+            let gap = (last_right - first_left - total_width) / (items.len() - 1) as f64;
+            let last_index = items.len() - 1;
+            let mut cursor = first_left;
+            for (index, item) in items.iter().enumerate() {
+                let delta_x = if index == 0 || index == last_index {
+                    0.0
+                } else {
+                    cursor - item.bounds.x
+                };
+                logical_movements.push((item.element_id, Point { x: delta_x, y: 0.0 }));
+                cursor += item.bounds.width + gap;
+            }
+        }
+        ArrangeOperation::DistributeVertical => {
+            items.sort_by(|a, b| {
+                a.bounds
+                    .y
+                    .total_cmp(&b.bounds.y)
+                    .then_with(|| a.element_id.cmp(&b.element_id))
+            });
+            let first_top = items[0].bounds.y;
+            let last_bottom = items.last().expect("distribution has items").bounds.y
+                + items.last().expect("distribution has items").bounds.height;
+            let total_height: f64 = items.iter().map(|item| item.bounds.height).sum();
+            let gap = (last_bottom - first_top - total_height) / (items.len() - 1) as f64;
+            let last_index = items.len() - 1;
+            let mut cursor = first_top;
+            for (index, item) in items.iter().enumerate() {
+                let delta_y = if index == 0 || index == last_index {
+                    0.0
+                } else {
+                    cursor - item.bounds.y
+                };
+                logical_movements.push((item.element_id, Point { x: 0.0, y: delta_y }));
+                cursor += item.bounds.height + gap;
+            }
+        }
+    }
+
+    let mut undo_movements = Vec::new();
+    let mut expanded_seen = BTreeSet::new();
+    for (element_id, delta_mm) in logical_movements {
+        if delta_mm.x == 0.0 && delta_mm.y == 0.0 {
+            continue;
+        }
+        let expanded_ids = expand_move_targets(document, &[element_id])?;
+        for expanded_id in &expanded_ids {
+            if !expanded_seen.insert(*expanded_id) {
+                return Err(EditorError::HistoryInvariantViolation);
+            }
+        }
+        for expanded_id in &expanded_ids {
+            let element = find_element_mut(document, *expanded_id)
+                .ok_or(EditorError::HistoryInvariantViolation)?;
+            translate_element_geometry(element, delta_mm);
+        }
+        undo_movements.push((
+            expanded_ids,
+            Point {
+                x: -delta_mm.x,
+                y: -delta_mm.y,
+            },
+        ));
+    }
+
+    if undo_movements.is_empty() {
+        return Ok(None);
+    }
+    synchronize_connected_endpoints(document)?;
+    Ok(Some(AppliedCommand {
+        undo: UndoStep::ArrangeElements {
+            movements: undo_movements,
         },
         structural: false,
     }))
@@ -2341,6 +2614,16 @@ fn apply_undo_step(document: &mut Document, step: &UndoStep) -> Result<(), Edito
             }
             synchronize_connected_endpoints(document)?;
         }
+        UndoStep::ArrangeElements { movements } => {
+            for (element_ids, delta_mm) in movements {
+                for element_id in element_ids {
+                    let element = find_element_mut(document, *element_id)
+                        .ok_or(EditorError::HistoryInvariantViolation)?;
+                    translate_element_geometry(element, *delta_mm);
+                }
+            }
+            synchronize_connected_endpoints(document)?;
+        }
         UndoStep::RestoreZOrder { target, roots } => {
             let layer =
                 find_layer_mut(document, *target).ok_or(EditorError::HistoryInvariantViolation)?;
@@ -2648,7 +2931,6 @@ fn translate_point(point: &mut Point, delta_mm: Point) {
 }
 
 /// Translate every absolute document-space geometry field owned by an element.
-///
 /// Bounds are common to every element. Connector endpoint positions and curve
 /// control points are also absolute document coordinates and must move with the
 /// element; normalized polygon/port geometry remains relative to the translated

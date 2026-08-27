@@ -79,6 +79,11 @@ description = "Allows the main editor window to invoke the reorder_selection app
 commands.allow = ["reorder_selection"]
 
 [[permission]]
+identifier = "allow-arrange-selection"
+description = "Allows the main editor window to invoke the arrange_selection application command."
+commands.allow = ["arrange_selection"]
+
+[[permission]]
 identifier = "allow-copy-selection"
 description = "Allows the main editor window to invoke the copy_selection application command."
 commands.allow = ["copy_selection"]

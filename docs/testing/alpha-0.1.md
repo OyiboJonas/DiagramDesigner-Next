@@ -23,6 +23,7 @@ The `0.1.0-alpha.1` version label is still used while the native alpha smoke gat
 - z-order controls for top-level elements and structural groups;
 - Group/Ungroup with logical group selection and atomic group movement;
 - group-aware Copy/Paste/Duplicate that preserves nested group hierarchy and internal references;
+- align left/center/right/top/middle/bottom plus horizontal/vertical distribution for logical multi-selection, including structural groups;
 - explicit Save As with `Ctrl/Cmd+Shift+S`, plus native confirmation before a newly selected existing `.ddnx` destination is replaced;
 - connector start/end marker and line-style editing for straight and orthogonal connectors, including preservation of imported custom legacy style codes until explicitly replaced.
 
@@ -46,6 +47,8 @@ These additions are covered by repository, frontend, DDNX and Windows/Tauri auto
 For current builds, also verify that Save As opens a new DDNX destination picker and that choosing an already-existing DDNX asks for explicit native confirmation. Choosing No/Cancel must leave the document and its current save association unchanged. A normal Save on an already-associated native DDNX continues to replace that exact file atomically without an additional overwrite prompt.
 
 Current builds also expose connector line and marker controls in the selection inspector. Standard start/end markers and line styles should update the rendered connector, Undo/Redo as one semantic edit and survive DDNX save/reopen. Imported custom marker/style codes are shown as legacy custom values and remain unchanged until deliberately replaced. Secondary colours used by Outline/UML/custom semantics retain imported system-palette values unless the colour is deliberately edited.
+
+The selection inspector also exposes layout controls. Two or more logical objects can be aligned to the selection envelope on any edge or center axis. Three or more can be distributed horizontally or vertically with the outermost objects fixed and equal visual gaps between intermediate objects. Structural groups participate as one logical object, the action is one Undo/Redo history step, and the result survives DDNX save/reopen.
 
 ## Alpha close/recovery behavior
 
