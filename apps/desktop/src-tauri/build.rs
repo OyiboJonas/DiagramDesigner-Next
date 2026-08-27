@@ -36,6 +36,7 @@ fn main() {
             "create_basic_element",
             "create_connector",
             "set_connector_endpoint",
+            "update_connector_style",
             "delete_selection",
             "update_element_properties",
             "update_element_appearance",

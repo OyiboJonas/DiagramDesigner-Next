@@ -315,6 +315,16 @@ struct SetConnectorEndpointRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct UpdateConnectorStyleRequest {
+    element_id: ElementId,
+    start_marker: MarkerStyle,
+    end_marker: MarkerStyle,
+    line_style: LineStyle,
+    secondary_color: Option<Color>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct UpdateElementPropertiesRequest {
     element_id: ElementId,
     bounds_mm: Rect,
@@ -386,6 +396,10 @@ struct ConnectorPropertiesDto {
     kind: &'static str,
     start: ConnectorEndpointDto,
     end: ConnectorEndpointDto,
+    start_marker: MarkerStyle,
+    end_marker: MarkerStyle,
+    line_style: LineStyle,
+    secondary_color: Option<Color>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1278,6 +1292,29 @@ fn set_connector_endpoint(
         .session
         .set_connector_endpoint(request.element_id, side, position_mm, request.connection)
         .map_err(|error| CommandError::new("connector_endpoint_failed", error.to_string()))?;
+    document
+        .session
+        .set_selection([request.element_id])
+        .map_err(|error| CommandError::new("selection_failed", error.to_string()))?;
+    Ok(element_edit_result_dto(&document))
+}
+
+#[tauri::command]
+fn update_connector_style(
+    request: UpdateConnectorStyleRequest,
+    state: State<'_, DesktopState>,
+) -> Result<ElementEditResultDto, CommandError> {
+    let mut document = lock_document(&state)?;
+    document
+        .session
+        .set_connector_style(
+            request.element_id,
+            request.start_marker,
+            request.end_marker,
+            request.line_style,
+            request.secondary_color,
+        )
+        .map_err(|error| CommandError::new("connector_style_failed", error.to_string()))?;
     document
         .session
         .set_selection([request.element_id])
@@ -2378,6 +2415,10 @@ fn connector_properties_dto(connector: AppConnectorEndpoints) -> Option<Connecto
         kind,
         start: connector_endpoint_dto(connector.start),
         end: connector_endpoint_dto(connector.end),
+        start_marker: connector.start_marker,
+        end_marker: connector.end_marker,
+        line_style: connector.line_style,
+        secondary_color: connector.secondary_color,
     })
 }
 
@@ -2801,6 +2842,7 @@ pub fn run() {
             create_basic_element,
             create_connector,
             set_connector_endpoint,
+            update_connector_style,
             delete_selection,
             update_element_properties,
             update_element_appearance,

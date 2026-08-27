@@ -109,6 +109,11 @@ description = "Allows the main editor window to invoke the set_connector_endpoin
 commands.allow = ["set_connector_endpoint"]
 
 [[permission]]
+identifier = "allow-update-connector-style"
+description = "Allows the main editor window to invoke the update_connector_style application command."
+commands.allow = ["update_connector_style"]
+
+[[permission]]
 identifier = "allow-delete-selection"
 description = "Allows the main editor window to invoke the delete_selection application command."
 commands.allow = ["delete_selection"]

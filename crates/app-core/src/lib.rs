@@ -11,8 +11,8 @@ use editor_core::{
 };
 use editor_runtime::{EditorRuntime, RecoveryCheckpointKey, RecoveryPlan};
 use next_domain::{
-    Color, Connection, Element, ElementId, ElementKind, FillStyle, Layer, LayerId, NextArtifact,
-    Page, PageId, Point, PortId, Rect, Size, StrokeStyle, TextBlock,
+    Color, Connection, Element, ElementId, ElementKind, FillStyle, Layer, LayerId, LineStyle,
+    MarkerStyle, NextArtifact, Page, PageId, Point, PortId, Rect, Size, StrokeStyle, TextBlock,
 };
 use thiserror::Error;
 
@@ -70,6 +70,10 @@ pub struct ConnectorEndpoints {
     pub kind: ConnectorGeometryKind,
     pub start: ConnectorEndpointState,
     pub end: ConnectorEndpointState,
+    pub start_marker: MarkerStyle,
+    pub end_marker: MarkerStyle,
+    pub line_style: LineStyle,
+    pub secondary_color: Option<Color>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -110,6 +114,10 @@ impl From<CoreConnectorEndpointSnapshot> for ConnectorEndpoints {
                 position_mm: value.end.position_mm,
                 connection: value.end.connection,
             },
+            start_marker: value.start_marker,
+            end_marker: value.end_marker,
+            line_style: value.line_style,
+            secondary_color: value.secondary_color,
         }
     }
 }
@@ -398,6 +406,24 @@ impl ApplicationSession {
             side: side.into(),
             position_mm,
             connection,
+        })
+    }
+
+    /// Replace connector marker/line semantics as one persistent history step.
+    pub fn set_connector_style(
+        &mut self,
+        element_id: ElementId,
+        start_marker: MarkerStyle,
+        end_marker: MarkerStyle,
+        line_style: LineStyle,
+        secondary_color: Option<Color>,
+    ) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::SetConnectorStyle {
+            element_id,
+            start_marker,
+            end_marker,
+            line_style,
+            secondary_color,
         })
     }
 

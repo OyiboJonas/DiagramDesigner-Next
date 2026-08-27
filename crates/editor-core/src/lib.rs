@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use next_domain::{
     Artifact, Color, Connection, Connector, Document, Element, ElementId, ElementKind,
-    ElementStyle, Endpoint, FillStyle, Layer, LayerId, NextArtifact, Page, PageId, Point, PortId,
-    Rect, Scene, Size, StrokeStyle, StyleId, TextBlock, ValidationReport,
+    ElementStyle, Endpoint, FillStyle, Layer, LayerId, LineStyle, MarkerStyle, NextArtifact, Page,
+    PageId, Point, PortId, Rect, Scene, Size, StrokeStyle, StyleId, TextBlock, ValidationReport,
 };
 use thiserror::Error;
 
@@ -75,6 +75,10 @@ pub struct ConnectorEndpointSnapshot {
     pub kind: ConnectorGeometryKind,
     pub start: Endpoint,
     pub end: Endpoint,
+    pub start_marker: MarkerStyle,
+    pub end_marker: MarkerStyle,
+    pub line_style: LineStyle,
+    pub secondary_color: Option<Color>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -137,6 +141,14 @@ pub enum EditCommand {
         side: ConnectorEndpointSide,
         position_mm: Point,
         connection: Option<Connection>,
+    },
+    /// Replace persisted connector paint semantics as one history command.
+    SetConnectorStyle {
+        element_id: ElementId,
+        start_marker: MarkerStyle,
+        end_marker: MarkerStyle,
+        line_style: LineStyle,
+        secondary_color: Option<Color>,
     },
     SetElementStyle {
         element_ids: Vec<ElementId>,
@@ -533,6 +545,13 @@ enum UndoStep {
         side: ConnectorEndpointSide,
         endpoint: Endpoint,
     },
+    SetConnectorStyle {
+        element_id: ElementId,
+        start_marker: MarkerStyle,
+        end_marker: MarkerStyle,
+        line_style: LineStyle,
+        secondary_color: Option<Color>,
+    },
     SetElementStyles {
         previous: Vec<(ElementId, Option<StyleId>)>,
     },
@@ -775,6 +794,10 @@ impl EditorSession {
             kind,
             start: connector.start.clone(),
             end: connector.end.clone(),
+            start_marker: connector.start_marker,
+            end_marker: connector.end_marker,
+            line_style: connector.line_style,
+            secondary_color: connector.secondary_color,
         }))
     }
 
@@ -1088,6 +1111,20 @@ fn apply_command(
             position_mm,
             connection,
         } => apply_set_connector_endpoint(document, *element_id, *side, *position_mm, *connection),
+        EditCommand::SetConnectorStyle {
+            element_id,
+            start_marker,
+            end_marker,
+            line_style,
+            secondary_color,
+        } => apply_set_connector_style(
+            document,
+            *element_id,
+            *start_marker,
+            *end_marker,
+            *line_style,
+            *secondary_color,
+        ),
         EditCommand::SetElementStyle {
             element_ids,
             style_id,
@@ -1569,6 +1606,55 @@ fn apply_set_connector_endpoint(
         },
         // Connection references participate in Next-domain structural validation.
         structural: true,
+    }))
+}
+
+fn apply_set_connector_style(
+    document: &mut Document,
+    element_id: ElementId,
+    start_marker: MarkerStyle,
+    end_marker: MarkerStyle,
+    line_style: LineStyle,
+    secondary_color: Option<Color>,
+) -> Result<Option<AppliedCommand>, EditorError> {
+    ensure_element_editable(document, element_id)?;
+    let (previous_start_marker, previous_end_marker, previous_line_style, previous_secondary_color) = {
+        let element =
+            find_element(document, element_id).ok_or(EditorError::ElementNotFound(element_id))?;
+        let connector = connector(element).ok_or(EditorError::ElementIsNotConnector(element_id))?;
+        (
+            connector.start_marker,
+            connector.end_marker,
+            connector.line_style,
+            connector.secondary_color,
+        )
+    };
+
+    if previous_start_marker == start_marker
+        && previous_end_marker == end_marker
+        && previous_line_style == line_style
+        && previous_secondary_color == secondary_color
+    {
+        return Ok(None);
+    }
+
+    let element =
+        find_element_mut(document, element_id).ok_or(EditorError::HistoryInvariantViolation)?;
+    let connector = connector_mut(element).ok_or(EditorError::HistoryInvariantViolation)?;
+    connector.start_marker = start_marker;
+    connector.end_marker = end_marker;
+    connector.line_style = line_style;
+    connector.secondary_color = secondary_color;
+
+    Ok(Some(AppliedCommand {
+        undo: UndoStep::SetConnectorStyle {
+            element_id,
+            start_marker: previous_start_marker,
+            end_marker: previous_end_marker,
+            line_style: previous_line_style,
+            secondary_color: previous_secondary_color,
+        },
+        structural: false,
     }))
 }
 
@@ -2291,6 +2377,21 @@ fn apply_undo_step(document: &mut Document, step: &UndoStep) -> Result<(), Edito
             ) = endpoint.clone();
             refresh_connector_bounds(document, *element_id)?;
             synchronize_connected_endpoints(document)?;
+        }
+        UndoStep::SetConnectorStyle {
+            element_id,
+            start_marker,
+            end_marker,
+            line_style,
+            secondary_color,
+        } => {
+            let element = find_element_mut(document, *element_id)
+                .ok_or(EditorError::HistoryInvariantViolation)?;
+            let connector = connector_mut(element).ok_or(EditorError::HistoryInvariantViolation)?;
+            connector.start_marker = *start_marker;
+            connector.end_marker = *end_marker;
+            connector.line_style = *line_style;
+            connector.secondary_color = *secondary_color;
         }
         UndoStep::SetElementStyles { previous } => {
             for (element_id, style_id) in previous {
