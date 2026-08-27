@@ -351,6 +351,7 @@ struct UpdateElementPropertiesRequest {
     rotation_deg: f64,
     text: Option<String>,
     text_style: Option<TextStyleDto>,
+    text_layout: Option<TextLayoutUpdateDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -361,6 +362,38 @@ struct TextStyleDto {
     underline: bool,
     font_family: Option<String>,
     font_size_pt: Option<u16>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TextLayoutDto {
+    horizontal: TextHorizontalAlignment,
+    vertical: TextVerticalAlignment,
+    margin_mm: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TextLayoutUpdateDto {
+    horizontal: Option<StandardTextHorizontalAlignment>,
+    vertical: Option<StandardTextVerticalAlignment>,
+    margin_mm: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StandardTextHorizontalAlignment {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StandardTextVerticalAlignment {
+    Top,
+    Center,
+    Bottom,
 }
 
 #[derive(Debug, Deserialize)]
@@ -423,6 +456,7 @@ struct ElementPropertiesDto {
     text: Option<String>,
     text_editable: bool,
     text_style: Option<TextStyleDto>,
+    text_layout: Option<TextLayoutDto>,
     geometry_editable: bool,
     appearance: ElementAppearanceDto,
     connector: Option<ConnectorPropertiesDto>,
@@ -1780,6 +1814,7 @@ fn update_element_properties(
         rotation_deg,
         text,
         text_style,
+        text_layout,
     } = request;
     let mut document = lock_document(&state)?;
     let existing =
@@ -1789,14 +1824,15 @@ fn update_element_properties(
                 "The selected element no longer exists in the current document.",
             )
         })?;
-    if !element_geometry_editable(&existing.kind) {
+    let geometry_changed = bounds_mm != existing.bounds_mm || rotation_deg != existing.rotation_deg;
+    if !element_geometry_editable(&existing.kind) && geometry_changed {
         return Err(CommandError::new(
             "element_geometry_requires_dedicated_tool",
-            "This element uses a dedicated geometry tool and cannot be resized in the basic inspector.",
+            "This element uses a dedicated geometry tool; its bounds and rotation cannot be changed in the basic inspector.",
         ));
     }
 
-    let text_update = if text.is_some() || text_style.is_some() {
+    let text_update = if text.is_some() || text_style.is_some() || text_layout.is_some() {
         let existing =
             find_element(document.session.session().document(), element_id).ok_or_else(|| {
                 CommandError::new(
@@ -1806,28 +1842,36 @@ fn update_element_properties(
             })?;
         let Some(existing_text) = existing.text.as_ref() else {
             return Err(CommandError::new(
-                "element_text_not_editable",
-                "This element does not contain editable text.",
+                "element_text_missing",
+                "This element does not contain a text block.",
             ));
         };
+
+        let content_or_style_update = text.is_some() || text_style.is_some();
         let (preview, editable, common_style) = text_preview(existing_text);
-        if !editable {
+        if content_or_style_update && !editable {
             return Err(CommandError::new(
                 "element_text_not_editable",
                 "This rich-text element cannot be flattened safely by the basic text editor.",
             ));
         }
-        let baseline_style = common_style.unwrap_or_default();
-        let next_style = match text_style {
-            Some(style) => text_style_from_dto(baseline_style, style)?,
-            None => baseline_style,
+
+        let mut next_text_block = if content_or_style_update {
+            let baseline_style = common_style.unwrap_or_default();
+            let next_style = match text_style {
+                Some(style) => text_style_from_dto(baseline_style, style)?,
+                None => baseline_style,
+            };
+            let next_text = text.as_deref().unwrap_or(&preview);
+            simple_text_block(next_text, next_style, Some(existing_text.layout))
+        } else {
+            existing_text.clone()
         };
-        let next_text = text.as_deref().unwrap_or(&preview);
-        Some(Some(simple_text_block(
-            next_text,
-            next_style,
-            Some(existing_text.layout),
-        )))
+
+        if let Some(layout_update) = text_layout {
+            next_text_block.layout = apply_text_layout_update(next_text_block.layout, layout_update)?;
+        }
+        Some(Some(next_text_block))
     } else {
         None
     };
@@ -2458,13 +2502,13 @@ fn element_properties_dto(
     connector: Option<AppConnectorEndpoints>,
     document: &Document,
 ) -> ElementPropertiesDto {
-    let (text, text_editable, text_style) = match element.text.as_ref() {
+    let (text, text_editable, text_style, text_layout) = match element.text.as_ref() {
         Some(block) => {
             let (preview, editable, common_style) = text_preview(block);
             let style = editable.then(|| text_style_dto(common_style.unwrap_or_default()));
-            (Some(preview), editable, style)
+            (Some(preview), editable, style, Some(text_layout_dto(block.layout)))
         }
-        None => (None, false, None),
+        None => (None, false, None, None),
     };
     ElementPropertiesDto {
         element_id: element.id,
@@ -2475,6 +2519,7 @@ fn element_properties_dto(
         text,
         text_editable,
         text_style,
+        text_layout,
         geometry_editable: element_geometry_editable(&element.kind),
         appearance: element_appearance_dto(element, document),
         connector: connector.and_then(connector_properties_dto),
@@ -2707,6 +2752,44 @@ fn text_style_from_dto(
     baseline.bold = style.bold;
     baseline.italic = style.italic;
     baseline.underline = style.underline;
+    Ok(baseline)
+}
+
+fn text_layout_dto(layout: TextLayout) -> TextLayoutDto {
+    TextLayoutDto {
+        horizontal: layout.horizontal,
+        vertical: layout.vertical,
+        margin_mm: layout.margin_mm,
+    }
+}
+
+fn apply_text_layout_update(
+    mut baseline: TextLayout,
+    update: TextLayoutUpdateDto,
+) -> Result<TextLayout, CommandError> {
+    if let Some(horizontal) = update.horizontal {
+        baseline.horizontal = match horizontal {
+            StandardTextHorizontalAlignment::Left => TextHorizontalAlignment::Left,
+            StandardTextHorizontalAlignment::Center => TextHorizontalAlignment::Center,
+            StandardTextHorizontalAlignment::Right => TextHorizontalAlignment::Right,
+        };
+    }
+    if let Some(vertical) = update.vertical {
+        baseline.vertical = match vertical {
+            StandardTextVerticalAlignment::Top => TextVerticalAlignment::Top,
+            StandardTextVerticalAlignment::Center => TextVerticalAlignment::Center,
+            StandardTextVerticalAlignment::Bottom => TextVerticalAlignment::Bottom,
+        };
+    }
+    if let Some(margin_mm) = update.margin_mm {
+        if !margin_mm.is_finite() || margin_mm < 0.0 {
+            return Err(CommandError::new(
+                "invalid_text_layout_margin",
+                "Text inner margin must be a finite non-negative value in millimetres.",
+            ));
+        }
+        baseline.margin_mm = margin_mm;
+    }
     Ok(baseline)
 }
 

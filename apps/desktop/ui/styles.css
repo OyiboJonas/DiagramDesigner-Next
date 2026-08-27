@@ -754,6 +754,17 @@ button.toggle-button[aria-pressed="true"] {
   gap: 8px;
 }
 
+.text-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.text-layout-margin {
+  grid-column: 1 / -1;
+}
+
 .text-formatting-toggles {
   display: flex;
   flex-wrap: wrap;

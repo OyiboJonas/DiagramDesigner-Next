@@ -22,6 +22,13 @@ import {
   buildAppearanceRequest,
 } from './editor-interaction/appearance-actions.mjs';
 import { buildUniformTextUpdate } from './editor-interaction/text-formatting-actions.mjs';
+import {
+  buildTextLayoutUpdate,
+  textHorizontalChoice,
+  textLayoutDisplayMargin,
+  textLayoutLegacyLabel,
+  textVerticalChoice,
+} from './editor-interaction/text-layout-actions.mjs';
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -102,6 +109,11 @@ const elements = {
   propertyTextBold: document.querySelector('#property-text-bold'),
   propertyTextItalic: document.querySelector('#property-text-italic'),
   propertyTextUnderline: document.querySelector('#property-text-underline'),
+  propertyTextLayout: document.querySelector('#property-text-layout'),
+  propertyTextHorizontal: document.querySelector('#property-text-horizontal'),
+  propertyTextVertical: document.querySelector('#property-text-vertical'),
+  propertyTextMargin: document.querySelector('#property-text-margin'),
+  propertyTextLayoutNote: document.querySelector('#property-text-layout-note'),
   applyProperties: document.querySelector('#apply-properties'),
   connectorStyleForm: document.querySelector('#connector-style-form'),
   connectorStartMarker: document.querySelector('#connector-start-marker'),
@@ -633,7 +645,8 @@ function renderSelectionProperties(details) {
 
   const primary = details?.primary ?? null;
   elements.applyProperties.disabled =
-    !primary || (primary.geometryEditable === false && primary.textEditable !== true);
+    !primary ||
+    (primary.geometryEditable === false && primary.textEditable !== true && !primary.textLayout);
   if (!primary) {
     svgSurface.setTransformSelection(null);
     svgSurface.setConnectorEndpointSelection(null);
@@ -682,9 +695,11 @@ function renderSelectionProperties(details) {
 
   const hasText = primary.text !== null && primary.text !== undefined;
   const editableTextStyle = primary.textEditable === true ? primary.textStyle ?? null : null;
+  const textLayout = hasText ? primary.textLayout ?? null : null;
   elements.propertyTextField.hidden = !hasText;
   elements.propertyTextNote.hidden = !hasText || primary.textEditable;
   elements.propertyTextFormatting.hidden = !editableTextStyle;
+  elements.propertyTextLayout.hidden = !textLayout;
   renderConnectorStyle(primary.connector);
   renderAppearance(primary.appearance);
 
@@ -706,8 +721,34 @@ function renderSelectionProperties(details) {
     elements.propertyTextItalic.checked = editableTextStyle.italic === true;
     elements.propertyTextUnderline.checked = editableTextStyle.underline === true;
   }
+  if (textLayout) {
+    setTextLayoutSelect(elements.propertyTextHorizontal, textLayout.horizontal, 'horizontal');
+    setTextLayoutSelect(elements.propertyTextVertical, textLayout.vertical, 'vertical');
+    elements.propertyTextMargin.value = String(textLayoutDisplayMargin(textLayout.marginMm));
+    const importedMarginFallback =
+      !Number.isFinite(Number(textLayout.marginMm)) || Number(textLayout.marginMm) < 0;
+    elements.propertyTextLayoutNote.textContent = importedMarginFallback
+      ? 'Imported inner margin is outside the editable range. The renderer fallback is shown; the original value is preserved until you deliberately change it.'
+      : 'Imported special alignments remain preserved until you deliberately select a standard alignment.';
+  }
 }
 
+function setTextLayoutSelect(select, value, axis) {
+  for (const option of [...select.options]) {
+    if (option.dataset.textLayoutLegacy === 'true') {
+      option.remove();
+    }
+  }
+  const choice = axis === 'horizontal' ? textHorizontalChoice(value) : textVerticalChoice(value);
+  if (choice.startsWith('legacy:')) {
+    const option = document.createElement('option');
+    option.value = choice;
+    option.textContent = textLayoutLegacyLabel(value, axis);
+    option.dataset.textLayoutLegacy = 'true';
+    select.prepend(option);
+  }
+  select.value = choice;
+}
 
 function setConnectorEnumSelect(select, value, label) {
   for (const option of [...select.options]) {
@@ -1177,10 +1218,6 @@ async function applyElementProperties(event) {
   if (!invoke || !primary) {
     return;
   }
-  if (primary.geometryEditable === false) {
-    setStatus('This element uses a dedicated geometry tool and cannot be resized in the basic inspector');
-    return;
-  }
   const numbers = {
     x: Number(elements.propertyX.value),
     y: Number(elements.propertyY.value),
@@ -1222,6 +1259,22 @@ async function applyElementProperties(event) {
           underline: elements.propertyTextUnderline.checked,
         }),
       );
+    } catch (error) {
+      setStatus(String(error?.message ?? error));
+      return;
+    }
+  }
+  if (primary.textLayout) {
+    try {
+      const textLayout = buildTextLayoutUpdate({
+        baseline: primary.textLayout,
+        horizontalChoice: elements.propertyTextHorizontal.value,
+        verticalChoice: elements.propertyTextVertical.value,
+        marginMm: elements.propertyTextMargin.value,
+      });
+      if (textLayout) {
+        request.textLayout = textLayout;
+      }
     } catch (error) {
       setStatus(String(error?.message ?? error));
       return;
