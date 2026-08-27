@@ -1,0 +1,43 @@
+name: Apply fill-gradient editor slice
+
+on:
+  push:
+    branches:
+      - editor-fill-gradients
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: editor-fill-gradients
+          fetch-depth: 0
+
+      - name: Apply guarded source integration
+        run: python tools/apply_fill_gradient_slice.py
+
+      - name: Format desktop Rust
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      - name: Run appearance contract regressions
+        run: node --test web/editor-interaction/appearance-actions.test.mjs
+
+      - name: Remove one-shot integration helpers
+        run: |
+          rm tools/apply_fill_gradient_slice.py
+          rm .github/workflows/apply-fill-gradient-slice.yml
+
+      - name: Commit integrated slice
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Editor: wire linear fill gradient controls"
+          git push origin HEAD:editor-fill-gradients
