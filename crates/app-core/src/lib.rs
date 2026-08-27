@@ -3,7 +3,7 @@ use ddnx::{
     compare_persistence, prepare_package, read_package, write_package_to_vec,
 };
 use editor_core::{
-    ConnectorEndpointSide as CoreConnectorEndpointSide,
+    ArrangeOperation as CoreArrangeOperation, ConnectorEndpointSide as CoreConnectorEndpointSide,
     ConnectorEndpointSnapshot as CoreConnectorEndpointSnapshot,
     ConnectorGeometryKind as CoreConnectorGeometryKind, EditCommand, EditTransaction, EditorError,
     EditorSession, HistoryStateId, LayerScope, LayerTarget,
@@ -46,6 +46,33 @@ pub enum ZOrderOperation {
     SendToBack,
     BringForward,
     SendBackward,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArrangeOperation {
+    AlignLeft,
+    AlignHorizontalCenter,
+    AlignRight,
+    AlignTop,
+    AlignVerticalCenter,
+    AlignBottom,
+    DistributeHorizontal,
+    DistributeVertical,
+}
+
+impl From<ArrangeOperation> for CoreArrangeOperation {
+    fn from(value: ArrangeOperation) -> Self {
+        match value {
+            ArrangeOperation::AlignLeft => Self::AlignLeft,
+            ArrangeOperation::AlignHorizontalCenter => Self::AlignHorizontalCenter,
+            ArrangeOperation::AlignRight => Self::AlignRight,
+            ArrangeOperation::AlignTop => Self::AlignTop,
+            ArrangeOperation::AlignVerticalCenter => Self::AlignVerticalCenter,
+            ArrangeOperation::AlignBottom => Self::AlignBottom,
+            ArrangeOperation::DistributeHorizontal => Self::DistributeHorizontal,
+            ArrangeOperation::DistributeVertical => Self::DistributeVertical,
+        }
+    }
 }
 
 impl From<ZOrderOperation> for CoreZOrderOperation {
@@ -289,6 +316,18 @@ impl ApplicationSession {
         self.execute_edit(EditCommand::MoveElements {
             element_ids,
             delta_mm,
+        })
+    }
+
+    /// Align or distribute direct scene roots from canonical document geometry.
+    pub fn arrange_elements(
+        &mut self,
+        element_ids: Vec<ElementId>,
+        operation: ArrangeOperation,
+    ) -> Result<bool, ApplicationError> {
+        self.execute_edit(EditCommand::ArrangeElements {
+            element_ids,
+            operation: operation.into(),
         })
     }
 
