@@ -1,0 +1,53 @@
+name: Apply align distribute core
+
+on:
+  push:
+    branches: [editor-align-distribute]
+    paths:
+      - scripts/apply-align-distribute-core.py
+      - .github/workflows/apply-align-distribute-core.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: editor-align-distribute
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: rustfmt, clippy
+      - name: Apply align distribute core changes
+        run: python scripts/apply-align-distribute-core.py
+      - name: Format
+        run: cargo fmt --all
+      - name: Editor core tests
+        run: cargo test --locked -p editor-core
+      - name: Application core arrange tests
+        run: cargo test --locked -p app-core --test arrange_application
+      - name: Application core tests
+        run: cargo test --locked -p app-core
+      - name: Workspace Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Diff check
+        run: git diff --check
+      - name: Commit product changes and remove temporary helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/apply-align-distribute-core.yml scripts/apply-align-distribute-core.py
+          git add \
+            crates/editor-core/src/lib.rs \
+            crates/editor-core/tests/arrange_elements.rs \
+            crates/app-core/src/lib.rs \
+            crates/app-core/tests/arrange_application.rs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Editor: add core align and distribute semantics"
+          git push origin HEAD:editor-align-distribute
