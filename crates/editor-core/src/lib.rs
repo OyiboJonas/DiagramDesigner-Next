@@ -1572,9 +1572,21 @@ fn apply_arrange_elements(
                     .total_cmp(&b.bounds.x)
                     .then_with(|| a.element_id.cmp(&b.element_id))
             });
+            let opposite_index = (1..items.len())
+                .max_by(|a, b| {
+                    let a_item = &items[*a];
+                    let b_item = &items[*b];
+                    (a_item.bounds.x + a_item.bounds.width)
+                        .total_cmp(&(b_item.bounds.x + b_item.bounds.width))
+                        .then_with(|| a_item.bounds.x.total_cmp(&b_item.bounds.x))
+                        .then_with(|| a_item.element_id.cmp(&b_item.element_id))
+                })
+                .expect("distribution has an opposite anchor");
+            let opposite = items.remove(opposite_index);
+            items.push(opposite);
             let first_left = items[0].bounds.x;
-            let last_right = items.last().expect("distribution has items").bounds.x
-                + items.last().expect("distribution has items").bounds.width;
+            let last = items.last().expect("distribution has items");
+            let last_right = last.bounds.x + last.bounds.width;
             let total_width: f64 = items.iter().map(|item| item.bounds.width).sum();
             let gap = (last_right - first_left - total_width) / (items.len() - 1) as f64;
             let last_index = items.len() - 1;
@@ -1596,9 +1608,21 @@ fn apply_arrange_elements(
                     .total_cmp(&b.bounds.y)
                     .then_with(|| a.element_id.cmp(&b.element_id))
             });
+            let opposite_index = (1..items.len())
+                .max_by(|a, b| {
+                    let a_item = &items[*a];
+                    let b_item = &items[*b];
+                    (a_item.bounds.y + a_item.bounds.height)
+                        .total_cmp(&(b_item.bounds.y + b_item.bounds.height))
+                        .then_with(|| a_item.bounds.y.total_cmp(&b_item.bounds.y))
+                        .then_with(|| a_item.element_id.cmp(&b_item.element_id))
+                })
+                .expect("distribution has an opposite anchor");
+            let opposite = items.remove(opposite_index);
+            items.push(opposite);
             let first_top = items[0].bounds.y;
-            let last_bottom = items.last().expect("distribution has items").bounds.y
-                + items.last().expect("distribution has items").bounds.height;
+            let last = items.last().expect("distribution has items");
+            let last_bottom = last.bounds.y + last.bounds.height;
             let total_height: f64 = items.iter().map(|item| item.bounds.height).sum();
             let gap = (last_bottom - first_top - total_height) / (items.len() - 1) as f64;
             let last_index = items.len() - 1;

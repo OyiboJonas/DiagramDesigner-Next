@@ -1,7 +1,7 @@
 # Frontend interaction contract
 
 Status: Phase 1 working contract  
-Date: 2026-08-21
+Date: 2026-08-27
 
 ## Purpose
 
@@ -68,6 +68,20 @@ EditCommand::MoveElements {
 ```
 
 The adapter must validate IDs/geometry and call the existing `EditorSession::execute` / transaction boundary once. It must not expose a generic arbitrary-command IPC endpoint to untrusted WebView code.
+
+## Discrete arrange actions
+
+Alignment and distribution are discrete semantic actions rather than pointer gestures. The frontend may enable or disable their controls from selection count, but it must not calculate final element positions or reproduce layout rules. It sends the selected stable element IDs plus the requested arrange operation through the application adapter; `editor-core` owns canonical document-space visual bounds, group expansion, connector synchronization and the single Undo/Redo history step.
+
+For horizontal or vertical distribution, `editor-core` defines the edge-case semantics as follows:
+
+- the leading anchor is the selected logical object with the smallest left/top visual edge, with the stable element ID as the deterministic tie-breaker;
+- the opposite anchor is a distinct selected logical object chosen from the remaining objects by the farthest right/bottom visual edge; leading edge and stable element ID provide deterministic tie-breakers;
+- intermediate logical objects retain leading-edge order and are placed at equal visual gaps between those anchors;
+- a negative computed gap is valid and represents equal overlap, including containment cases;
+- structural groups participate as one logical object using canonical subtree visual bounds and expand only when the resulting movement is committed.
+
+The frontend must not duplicate these rules. This keeps restricted WebView intents caller-order-independent and prevents UI geometry from diverging from `EditCommand::ArrangeElements`.
 
 ## Follow-on gestures
 
