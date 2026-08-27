@@ -69,7 +69,7 @@ fn fixture() -> (EditorSession, ElementId) {
     )
 }
 
-fn element<'a>(session: &'a EditorSession, id: ElementId) -> &'a Element {
+fn element(session: &EditorSession, id: ElementId) -> &Element {
     session.document().pages[0].layers[0]
         .scene
         .elements
@@ -85,28 +85,30 @@ fn gradient_appearance_is_one_history_step_and_round_trips_undo_redo_losslessly(
     let start_color = Color::SystemPalette { index: 3 };
     let end_color = Color::SystemPalette { index: 7 };
 
-    assert!(session
-        .execute(EditCommand::SetElementAppearance {
-            element_id,
-            stroke: Some(StrokeStyle {
-                width_mm: 0.25,
-                color: Color::Rgba {
-                    r: 0,
-                    g: 0,
-                    b: 0,
-                    a: 255,
-                },
-            }),
-            fill: Some(FillStyle {
-                color: start_color,
-                gradient: Some(LinearGradient {
-                    end_color,
-                    axis: GradientAxis::AlongY,
+    assert!(
+        session
+            .execute(EditCommand::SetElementAppearance {
+                element_id,
+                stroke: Some(StrokeStyle {
+                    width_mm: 0.25,
+                    color: Color::Rgba {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 255,
+                    },
                 }),
-            }),
-            text_color: None,
-        })
-        .unwrap());
+                fill: Some(FillStyle {
+                    color: start_color,
+                    gradient: Some(LinearGradient {
+                        end_color,
+                        axis: GradientAxis::AlongY,
+                    }),
+                }),
+                text_color: None,
+            })
+            .unwrap()
+    );
 
     let after = session.current_history_state();
     assert_ne!(after, before);
@@ -126,11 +128,13 @@ fn gradient_appearance_is_one_history_step_and_round_trips_undo_redo_losslessly(
     assert!(session.undo().unwrap());
     assert_eq!(session.current_history_state(), before);
     assert_eq!(element(&session, element_id).style_id, None);
-    assert!(session
-        .document()
-        .styles
-        .iter()
-        .all(|style| style.id != style_id));
+    assert!(
+        session
+            .document()
+            .styles
+            .iter()
+            .all(|style| style.id != style_id)
+    );
 
     assert!(session.redo().unwrap());
     assert_eq!(session.current_history_state(), after);
