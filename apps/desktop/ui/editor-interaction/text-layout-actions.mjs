@@ -12,6 +12,7 @@ function enumKind(value, axis) {
   return value.kind;
 }
 
+// Opaque legacy choices are UI identity only; they are never accepted as writable IPC values.
 function legacyChoice(value, axis) {
   return `legacy:${axis}:${JSON.stringify(value)}`;
 }
