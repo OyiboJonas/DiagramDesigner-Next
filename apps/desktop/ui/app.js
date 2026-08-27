@@ -17,6 +17,10 @@ import {
   connectorStyleEquals,
   connectorUsesSecondary,
 } from './editor-interaction/connector-style-actions.mjs';
+import {
+  appearanceControlState,
+  buildAppearanceRequest,
+} from './editor-interaction/appearance-actions.mjs';
 
 const invoke = window.__TAURI__?.core?.invoke;
 
@@ -109,6 +113,10 @@ const elements = {
   appearanceFillSection: document.querySelector('#appearance-fill-section'),
   appearanceFillEnabled: document.querySelector('#appearance-fill-enabled'),
   appearanceFillColor: document.querySelector('#appearance-fill-color'),
+  appearanceFillGradientEnabled: document.querySelector('#appearance-fill-gradient-enabled'),
+  appearanceFillGradientControls: document.querySelector('#appearance-fill-gradient-controls'),
+  appearanceFillGradientEndColor: document.querySelector('#appearance-fill-gradient-end-color'),
+  appearanceFillGradientAxis: document.querySelector('#appearance-fill-gradient-axis'),
   appearanceTextColorField: document.querySelector('#appearance-text-color-field'),
   appearanceTextColor: document.querySelector('#appearance-text-color'),
   applyAppearance: document.querySelector('#apply-appearance'),
@@ -801,6 +809,9 @@ function renderAppearance(appearance) {
   elements.appearanceStrokeWidth.value = String(appearance.strokeWidthMm);
   elements.appearanceFillEnabled.checked = appearance.fillEnabled;
   elements.appearanceFillColor.value = appearance.fillColor;
+  elements.appearanceFillGradientEnabled.checked = appearance.fillGradientEnabled;
+  elements.appearanceFillGradientEndColor.value = appearance.fillGradientEndColor;
+  elements.appearanceFillGradientAxis.value = appearance.fillGradientAxis;
   elements.appearanceTextColor.value = appearance.textColor;
   appearanceBaseline = Object.freeze({ ...appearance });
   updateAppearanceEnabledState();
@@ -809,7 +820,15 @@ function renderAppearance(appearance) {
 function updateAppearanceEnabledState() {
   elements.appearanceStrokeColor.disabled = !elements.appearanceStrokeEnabled.checked;
   elements.appearanceStrokeWidth.disabled = !elements.appearanceStrokeEnabled.checked;
-  elements.appearanceFillColor.disabled = !elements.appearanceFillEnabled.checked;
+  const fillState = appearanceControlState({
+    fillEnabled: elements.appearanceFillEnabled.checked,
+    fillGradientEnabled: elements.appearanceFillGradientEnabled.checked,
+  });
+  elements.appearanceFillColor.disabled = fillState.fillColorDisabled;
+  elements.appearanceFillGradientEnabled.disabled = fillState.gradientToggleDisabled;
+  elements.appearanceFillGradientControls.hidden = fillState.gradientDetailsDisabled;
+  elements.appearanceFillGradientEndColor.disabled = fillState.gradientDetailsDisabled;
+  elements.appearanceFillGradientAxis.disabled = fillState.gradientDetailsDisabled;
 }
 
 async function applyAppearance(event) {
@@ -819,38 +838,27 @@ async function applyAppearance(event) {
   if (!invoke || !primary || !baseline) {
     return;
   }
-  const request = { elementId: primary.elementId };
-  if (baseline.strokeApplicable) {
-    if (elements.appearanceStrokeEnabled.checked !== baseline.strokeEnabled) {
-      request.strokeEnabled = elements.appearanceStrokeEnabled.checked;
-    }
-    if (elements.appearanceStrokeColor.value.toLowerCase() !== baseline.strokeColor.toLowerCase()) {
-      request.strokeColor = elements.appearanceStrokeColor.value;
-    }
-    const width = Number(elements.appearanceStrokeWidth.value);
-    if (!Number.isFinite(width) || width <= 0) {
-      setStatus('Stroke width must be a finite positive value');
-      return;
-    }
-    if (width !== baseline.strokeWidthMm) {
-      request.strokeWidthMm = width;
-    }
+
+  let request;
+  try {
+    request = buildAppearanceRequest({
+      elementId: primary.elementId,
+      baseline,
+      strokeEnabled: elements.appearanceStrokeEnabled.checked,
+      strokeColor: elements.appearanceStrokeColor.value,
+      strokeWidthMm: elements.appearanceStrokeWidth.value,
+      fillEnabled: elements.appearanceFillEnabled.checked,
+      fillColor: elements.appearanceFillColor.value,
+      fillGradientEnabled: elements.appearanceFillGradientEnabled.checked,
+      fillGradientEndColor: elements.appearanceFillGradientEndColor.value,
+      fillGradientAxis: elements.appearanceFillGradientAxis.value,
+      textColor: elements.appearanceTextColor.value,
+    });
+  } catch (error) {
+    setStatus(String(error?.message ?? error));
+    return;
   }
-  if (baseline.fillApplicable) {
-    if (elements.appearanceFillEnabled.checked !== baseline.fillEnabled) {
-      request.fillEnabled = elements.appearanceFillEnabled.checked;
-    }
-    if (elements.appearanceFillColor.value.toLowerCase() !== baseline.fillColor.toLowerCase()) {
-      request.fillColor = elements.appearanceFillColor.value;
-    }
-  }
-  if (
-    baseline.textColorApplicable &&
-    elements.appearanceTextColor.value.toLowerCase() !== baseline.textColor.toLowerCase()
-  ) {
-    request.textColor = elements.appearanceTextColor.value;
-  }
-  if (Object.keys(request).length === 1) {
+  if (!request) {
     setStatus('Appearance unchanged');
     return;
   }
@@ -1669,6 +1677,7 @@ elements.appearanceForm.addEventListener('submit', (event) => {
 });
 elements.appearanceStrokeEnabled.addEventListener('change', updateAppearanceEnabledState);
 elements.appearanceFillEnabled.addEventListener('change', updateAppearanceEnabledState);
+elements.appearanceFillGradientEnabled.addEventListener('change', updateAppearanceEnabledState);
 
 
 function saveStatus(result, prefix = 'Saved') {

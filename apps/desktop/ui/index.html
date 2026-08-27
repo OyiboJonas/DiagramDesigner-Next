@@ -241,7 +241,7 @@
             <form id="selection-appearance-form" class="appearance-form" hidden>
               <div class="appearance-heading">
                 <h3>Appearance</h3>
-                <span>basic</span>
+                <span>stroke · fill · gradient</span>
               </div>
               <div id="appearance-stroke-section" class="appearance-section">
                 <label class="appearance-toggle"><input id="appearance-stroke-enabled" type="checkbox" /> Stroke</label>
@@ -252,7 +252,18 @@
               </div>
               <div id="appearance-fill-section" class="appearance-section">
                 <label class="appearance-toggle"><input id="appearance-fill-enabled" type="checkbox" /> Fill</label>
-                <label class="appearance-color-field">Color <input id="appearance-fill-color" type="color" value="#ffffff" /></label>
+                <label class="appearance-color-field">Start color <input id="appearance-fill-color" type="color" value="#ffffff" /></label>
+                <label class="appearance-toggle"><input id="appearance-fill-gradient-enabled" type="checkbox" /> Linear gradient</label>
+                <div id="appearance-fill-gradient-controls" class="appearance-section" hidden>
+                  <label class="appearance-color-field">End color <input id="appearance-fill-gradient-end-color" type="color" value="#ffffff" /></label>
+                  <label class="property-field">Direction
+                    <select id="appearance-fill-gradient-axis">
+                      <option value="along_x">Horizontal</option>
+                      <option value="along_y">Vertical</option>
+                    </select>
+                  </label>
+                </div>
+                <p class="property-note">Imported system colours remain unchanged until you edit the corresponding colour picker.</p>
               </div>
               <label id="appearance-text-color-field" class="appearance-color-field">
                 Text color <input id="appearance-text-color" type="color" value="#000000" />
